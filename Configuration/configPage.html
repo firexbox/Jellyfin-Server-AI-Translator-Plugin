@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>AI 翻译插件</title>
+</head>
+<body>
+    <div id="configPage" data-role="page" class="page type-interior pluginConfigurationPage configPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <h1>AI 翻译插件</h1>
+                <p style="color:#888;margin-bottom:2em">使用 AI 自动翻译字幕并保存为 Jellyfin 原生字幕轨道</p>
+
+                <!-- 进度面板 -->
+                <div id="globalProgressPanel" style="display:none;margin-bottom:1.5em;background:#1c2c1c;border:1px solid #3a5a3a;border-radius:8px;padding:16px">
+                    <h3 style="margin:0 0 12px 0;color:#8f8;font-size:15px">[ 翻译任务进度 ]</h3>
+                    <div id="globalProgressList"></div>
+                </div>
+
+                <h2>[ 设置 ]</h2>
+                <form class="configForm" style="max-width:800px">
+                    <div class="inputContainer">
+                        <select is="emby-select" id="apiProvider" label="AI 提供商">
+                            <option value="DeepSeek">DeepSeek</option>
+                            <option value="OpenAI">OpenAI 兼容</option>
+                            <option value="Ollama">Ollama 本地</option>
+                        </select>
+                        <div class="fieldDescription">选择要使用的 AI 翻译服务</div>
+                    </div>
+                    <div class="inputContainer" id="apiKeyContainer">
+                        <input is="emby-input" type="password" id="apiKey" label="API 密钥" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="apiUrl" label="API 地址（可选）" />
+                        <div class="fieldDescription">留空使用各提供商默认地址</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="modelName" label="模型名称（可选）" />
+                        <div class="fieldDescription">留空使用各提供商默认模型</div>
+                    </div>
+                    <div class="inputContainer">
+                        <select is="emby-select" id="targetLanguage" label="目标语言">
+                            <option value="中文">中文 (Chinese)</option>
+                            <option value="日文">日文 (Japanese)</option>
+                            <option value="韩文">韩文 (Korean)</option>
+                            <option value="德语">德语 (German)</option>
+                            <option value="法语">法语 (French)</option>
+                            <option value="西班牙语">西班牙语 (Spanish)</option>
+                            <option value="英文">英文 (English)</option>
+                            <option value="俄语">俄语 (Russian)</option>
+                            <option value="葡萄牙语">葡萄牙语 (Portuguese)</option>
+                            <option value="阿拉伯语">阿拉伯语 (Arabic)</option>
+                            <option value="意大利语">意大利语 (Italian)</option>
+                        </select>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="batchSize" label="批处理大小" value="5" min="1" max="50" />
+                    </div>
+
+                    <div style="margin-top:2em;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+                        <button is="emby-button" type="submit" class="raised button-submit">💾 保存配置</button>
+                        <button is="emby-button" type="button" id="btnTestApi" class="raised">🔌 测试 API</button>
+                        <span id="statusMsg" style="font-size:13px"></span>
+                    </div>
+                </form>
+
+                <hr style="border:none;border-top:1px solid #333;margin:2em 0" />
+
+                <h2>🌐 一键翻译字幕</h2>
+                <div class="inputContainer" style="max-width:600px">
+                    <input is="emby-input" type="text" id="searchInput" label="搜索视频" onkeypress="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnSearch').click()}" />
+                    <div class="fieldDescription">输入视频名称，按回车或点击搜索</div>
+                </div>
+                <button is="emby-button" type="button" id="btnSearch" class="raised">🔍 搜索</button>
+
+                <div id="searchResults" style="margin-top:1em"></div>
+
+                <div id="translatePanel" style="display:none;margin-top:1.5em">
+                    <h3 id="selectedTitle" style="margin-bottom:1em"></h3>
+                    <div id="subtitleList"></div>
+                    <div id="translateStatus" style="font-size:13px;margin-top:1em;min-height:1.2em"></div>
+                    <div id="progressWrap" style="display:none;margin-top:1em;background:#1c1c1c;border-radius:6px;padding:16px">
+                        <div class="progressBar" style="background:#333;border-radius:4px;height:6px;overflow:hidden">
+                            <div id="progressFill" style="background:#00a4dc;border-radius:4px;height:100%;width:0%;transition:width .3s"></div>
+                        </div>
+                        <div id="progressText" style="color:#888;text-align:center;margin-top:8px;font-size:13px"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var pluginId = "3BE29809-6E1A-4D01-8B20-67A0B1A3C9F8";
+            var _progressTimer = null;
+            var _activeTasks = {};
+
+            document.querySelector('.configPage').addEventListener('pageshow', function () {
+                loadConfig();
+                loadGlobalProgress();
+            });
+
+            function loadConfig() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    document.getElementById('apiProvider').value = config.ApiProvider || 'DeepSeek';
+                    document.getElementById('apiKey').value = config.ApiKey || '';
+                    document.getElementById('apiUrl').value = config.ApiUrl || '';
+                    document.getElementById('modelName').value = config.ModelName || '';
+                    document.getElementById('targetLanguage').value = config.TargetLanguage || '中文';
+                    document.getElementById('batchSize').value = config.BatchSize || 5;
+                    onProviderChange();
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function onProviderChange() {
+                var p = document.getElementById('apiProvider').value;
+                var k = document.getElementById('apiKeyContainer');
+                if (k) k.style.display = (p === 'Ollama') ? 'none' : 'block';
+            }
+
+            document.getElementById('apiProvider').addEventListener('change', onProviderChange);
+
+            document.querySelector('.configForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                saveConfigDirect(function(success){
+                    Dashboard.hideLoadingMsg();
+                    document.getElementById('statusMsg').textContent = success ? '[OK] 已保存' : '[ERR] 保存失败';
+                    document.getElementById('statusMsg').style.color = success ? '#8f8' : '#f88';
+                });
+                return false;
+            });
+
+            function saveConfigDirect(callback) {
+                var config = {
+                    apiProvider: document.getElementById('apiProvider').value,
+                    apiKey: document.getElementById('apiKey').value,
+                    apiUrl: document.getElementById('apiUrl').value,
+                    modelName: document.getElementById('modelName').value,
+                    targetLanguage: document.getElementById('targetLanguage').value,
+                    batchSize: parseInt(document.getElementById('batchSize').value) || 5
+                };
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', ApiClient.getUrl('/AITranslator/Config'), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function() { callback(xhr.status >= 200 && xhr.status < 300); };
+                xhr.onerror = function() { callback(false); };
+                xhr.send(JSON.stringify(config));
+            }
+
+            document.getElementById('btnTestApi').addEventListener('click', function () {
+                var sm = document.getElementById('statusMsg');
+                sm.textContent = '[...] 测试中...';
+                sm.style.color = '#8cf';
+                saveConfigDirect(function(saved){
+                    if (!saved) { sm.textContent = '[ERR] 配置保存失败'; sm.style.color = '#f88'; return; }
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', ApiClient.getUrl('/AITranslator/TranslateContent'), true);
+                    xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.onload = function() {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                var r = JSON.parse(xhr.responseText);
+                                var c = r.Content || r.content || '';
+                                c ? (sm.textContent = '[OK] 连接正常: ' + c.substring(0, 50), sm.style.color = '#8f8') : (sm.textContent = '[WARN] 返回空', sm.style.color = '#fc0');
+                            } catch(e) { sm.textContent = '[ERR] 解析错误'; sm.style.color = '#f88'; }
+                        } else { sm.textContent = '[ERR] API 错误 (' + xhr.status + ')'; sm.style.color = '#f88'; }
+                    };
+                    xhr.onerror = function() { sm.textContent = '[ERR] 网络错误'; sm.style.color = '#f88'; };
+                    xhr.send(JSON.stringify({content: "1\n00:00:01,000 --> 00:00:03,000\nHello world", format: 'srt'}));
+                });
+            });
+
+            var selectedItemId = null, selectedItemName = '';
+
+            // ======== 全局进度监视 ========
+            function loadGlobalProgress() {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', ApiClient.getUrl('/AITranslator/Progress'), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            var tasks = JSON.parse(xhr.responseText) || [];
+                            renderGlobalProgress(tasks);
+                        } catch(e) {}
+                    }
+                };
+                xhr.send();
+                // 每 10 秒刷新
+                if (_progressTimer) clearInterval(_progressTimer);
+                _progressTimer = setInterval(function() {
+                    var x = new XMLHttpRequest();
+                    x.open('GET', ApiClient.getUrl('/AITranslator/Progress'), true);
+                    x.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
+                    x.onload = function() {
+                        if (x.status >= 200 && x.status < 300) {
+                            try { renderGlobalProgress(JSON.parse(x.responseText) || []); } catch(e) {}
+                        }
+                    };
+                    x.send();
+                }, 10000);
+            }
+
+            function renderGlobalProgress(tasks) {
+                var panel = document.getElementById('globalProgressPanel');
+                var list = document.getElementById('globalProgressList');
+                var running = tasks.filter(function(t) { return t.Status === 'running' || t.Status === 'translating'; });
+                var recent = tasks.filter(function(t) { return t.Status === 'completed' || t.Status === 'failed'; }).slice(0, 5);
+                if (!running.length && !recent.length) { panel.style.display = 'none'; return; }
+                panel.style.display = 'block';
+                var h = '';
+                running.forEach(function(t) {
+                    var modeText = t.Mode === 'translated' ? '翻译' : '双语';
+                    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px;background:#0a1a0a;border-radius:4px">';
+                    h += '<span style="font-size:14px;color:#8f8">[RUN]</span>';
+                    h += '<div style="flex:1"><div style="color:#fff;font-size:13px">' + (t.ItemName || t.ItemId) + '</div>';
+                    h += '<div style="color:#8f8;font-size:12px">' + modeText + ' ' + t.EntryCount + '条 ' + t.SourceLanguage + '[>]' + t.TargetLanguage + ' | ' + t.Message + '</div></div>';
+                    h += '<span style="color:#fc0;font-size:12px">进行中</span></div>';
+                });
+                recent.forEach(function(t) {
+                    var ok = t.Status === 'completed';
+                    var modeText = t.Mode === 'translated' ? '翻译' : '双语';
+                    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:6px 8px;background:' + (ok?'#0a1a0a':'#1a0a0a') + ';border-radius:4px;opacity:0.8">';
+                    h += '<span style="font-size:14px;color:' + (ok?'#8f8':'#f88') + '">' + (ok?'[OK]':'[ERR]') + '</span>';
+                    h += '<div style="flex:1"><div style="color:#aaa;font-size:12px">' + (t.ItemName || t.ItemId) + '</div>';
+                    h += '<div style="color:' + (ok?'#8f8':'#f88') + ';font-size:11px">' + modeText + ' ' + t.SourceLanguage + '[>]' + t.TargetLanguage + ' | ' + t.Message + '</div></div></div>';
+                });
+                list.innerHTML = h || '暂无翻译任务';
+            }
+
+            // ======== 搜索 ========
+            document.getElementById('btnSearch').addEventListener('click', function () {
+                var q = document.getElementById('searchInput').value.trim();
+                if (q.length < 2) { document.getElementById('searchResults').innerHTML = '<div style="color:#888;padding:12px">输入至少2个字符</div>'; return; }
+                document.getElementById('searchResults').innerHTML = '<div style="color:#888;padding:12px">搜索中...</div>';
+                var token = ApiClient.accessToken();
+                var searchUrl = '/Items?Recursive=true&SearchTerm=' + encodeURIComponent(q) + '&Limit=20&IncludeItemTypes=Episode,Movie';
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', ApiClient.getUrl(searchUrl), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            var d = JSON.parse(xhr.responseText);
+                            var items = d.Items || [];
+                            if (items.length) { renderSearchResults(items); return; }
+                        } catch(e) {}
+                    }
+                    var fallbackUrl = '/Items?Recursive=true&Limit=50&IncludeItemTypes=Episode,Movie';
+                    var xhr2 = new XMLHttpRequest();
+                    xhr2.open('GET', ApiClient.getUrl(fallbackUrl), true);
+                    xhr2.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                    xhr2.onload = function() {
+                        try {
+                            var d2 = JSON.parse(xhr2.responseText);
+                            var all = d2.Items || [];
+                            var filtered = all.filter(function(it) {
+                                var name = (it.Name || '').toLowerCase();
+                                var series = (it.SeriesName || '').toLowerCase();
+                                var ql = q.toLowerCase();
+                                return name.indexOf(ql) >= 0 || series.indexOf(ql) >= 0;
+                            });
+                            renderSearchResults(filtered);
+                        } catch(e) { document.getElementById('searchResults').innerHTML = '<div style="color:#f88;padding:12px">搜索失败</div>'; }
+                    };
+                    xhr2.onerror = function() { document.getElementById('searchResults').innerHTML = '<div style="color:#f88;padding:12px">搜索失败</div>'; };
+                    xhr2.send();
+                };
+                xhr.onerror = function() { document.getElementById('searchResults').innerHTML = '<div style="color:#f88;padding:12px">搜索失败</div>'; };
+                xhr.send();
+            });
+
+            function renderSearchResults(items) {
+                if (!items.length) { document.getElementById('searchResults').innerHTML = '<div style="color:#888;padding:12px">未找到匹配的视频</div>'; return; }
+                var h = '';
+                items.forEach(function (it) {
+                    var n = it.Name || '', s = it.SeriesName ? (it.SeriesName + ' - ') : '';
+                    h += '<div class="resultItem" data-id="' + it.Id + '" data-name="' + (s + n).replace(/"/g, '&quot;') + '" style="background:#222;border-radius:6px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">';
+                    h += '<div><div style="color:#fff;font-size:14px;font-weight:500">' + s + n + '</div><div style="color:#888;font-size:12px;margin-top:2px">' + it.Type + (it.ProductionYear ? ' | ' + it.ProductionYear : '') + '</div></div>';
+                    h += '<span style="color:#00a4dc">[&gt;]</span></div>';
+                });
+                document.getElementById('searchResults').innerHTML = h;
+                document.querySelectorAll('.resultItem').forEach(function (el) {
+                    el.addEventListener('click', function () { selectItem(this.dataset.id, this.dataset.name); });
+                });
+            }
+
+            // ======== 选择视频和字幕列表 ========
+            function selectItem(id, name) {
+                selectedItemId = id; selectedItemName = name;
+                document.getElementById('translatePanel').style.display = 'block';
+                document.getElementById('selectedTitle').textContent = '[视频] ' + name;
+                document.getElementById('subtitleList').innerHTML = '<div style="color:#888;padding:12px">正在获取字幕信息...</div>';
+                document.getElementById('translateStatus').textContent = '';
+                document.getElementById('progressWrap').style.display = 'none';
+
+                var token = ApiClient.accessToken();
+                var userId = ApiClient.getCurrentUserId();
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', ApiClient.getUrl('/Items/' + id + '/PlaybackInfo?UserId=' + userId), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try { renderSubtitles(id, name, JSON.parse(xhr.responseText)); }
+                        catch(e) { document.getElementById('subtitleList').innerHTML = '<div style="color:#f88;padding:12px">解析失败</div>'; }
+                    } else { document.getElementById('subtitleList').innerHTML = '<div style="color:#f88;padding:12px">获取失败 (' + xhr.status + ')</div>'; }
+                };
+                xhr.onerror = function() { document.getElementById('subtitleList').innerHTML = '<div style="color:#f88;padding:12px">网络错误</div>'; };
+                xhr.send();
+            }
+
+            function renderSubtitles(itemId, itemName, data) {
+                var subs = [];
+                (data.MediaSources || []).forEach(function(ms) {
+                    (ms.MediaStreams || []).forEach(function(s) { if (s.Type === 'Subtitle') subs.push(s); });
+                });
+                if (!subs.length) {
+                    document.getElementById('subtitleList').innerHTML = '<div style="color:#f88;padding:12px">[WARN] 没有可翻译的字幕</div>';
+                    return;
+                }
+                document.getElementById('subtitleList').innerHTML = '<div style="color:#888;padding:12px">正在 AI 检测语言...</div>';
+
+                var token = ApiClient.accessToken();
+                var userId = ApiClient.getCurrentUserId();
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', ApiClient.getUrl('/AITranslator/Subtitle/LanguageInfo?itemId=' + itemId + '&userId=' + userId), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.onload = function() {
+                    var langResults = [];
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try { langResults = JSON.parse(xhr.responseText) || []; } catch(e) {}
+                    }
+                    renderSubtitleList(itemId, subs, langResults);
+                };
+                xhr.onerror = function() { renderSubtitleList(itemId, subs, []); };
+                xhr.send();
+            }
+
+            function renderSubtitleList(itemId, subs, langResults) {
+                var h = '';
+                var targetLang = document.getElementById('targetLanguage').value;
+                subs.forEach(function(s) {
+                    var langResult = null;
+                    for (var i = 0; i < langResults.length; i++) {
+                        if (langResults[i].Index === s.Index) { langResult = langResults[i]; break; }
+                    }
+                    var langName = langResult ? langResult.DetectedName : (langNameMap(s.Language) || s.Language || '??');
+                    var langCode = langResult ? langResult.DetectedCode : (s.Language || '??');
+                    var isExternal = s.IsExternal ? '外部' : '内嵌';
+                    var codec = s.Codec || 'srt';
+                    var title = s.Title || '';
+                    var jfLang = s.Language || '';
+
+                    // 颜色标签
+                    var tagBg = '#333', tagColor = '#aaa';
+                    if (langCode === 'eng' || langCode === 'en') { tagBg = '#1a2a3a'; tagColor = '#8cf'; }
+                    else if (langCode === 'chi' || langCode === 'zho' || langCode === 'zh') { tagBg = '#1a3a1a'; tagColor = '#8f8'; }
+                    else if (langCode === 'jpn' || langCode === 'ja') { tagBg = '#3a1a1a'; tagColor = '#f88'; }
+                    else if (langCode === 'kor' || langCode === 'ko') { tagBg = '#3a3a1a'; tagColor = '#ff8'; }
+                    else if (langCode === 'deu' || langCode === 'de') { tagBg = '#1a1a3a'; tagColor = '#aaf'; }
+                    else if (langCode === 'fra' || langCode === 'fr') { tagBg = '#3a1a3a'; tagColor = '#faf'; }
+                    else if (langCode === 'spa' || langCode === 'es') { tagBg = '#1a3a3a'; tagColor = '#aff'; }
+
+                    // AI 检测与 Jellyfin 标注不一致提示
+                    var mismatchHint = '';
+                    if (langResult && jfLang && langResult.DetectedCode !== jfLang &&
+                        !((langResult.DetectedCode === 'en' && jfLang === 'eng') ||
+                          (langResult.DetectedCode === 'zh' && (jfLang === 'chi' || jfLang === 'zho')) ||
+                          (langResult.DetectedCode === 'ja' && jfLang === 'jpn') ||
+                          (langResult.DetectedCode === 'ko' && jfLang === 'kor') ||
+                          (langResult.DetectedCode === 'de' && jfLang === 'deu') ||
+                          (langResult.DetectedCode === 'fr' && jfLang === 'fra') ||
+                          (langResult.DetectedCode === 'es' && jfLang === 'spa'))) {
+                        mismatchHint = ' <span style="font-size:10px;color:#fc0" title="Jellyfin 标注: ' + jfLang + '">[!]</span>';
+                    }
+
+                    h += '<div style="background:#242424;border-radius:4px;padding:10px 12px;margin-bottom:8px">';
+                    h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+                    h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'original\',this)">[原] 原字幕</button>';
+                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#2a6a2a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'translated\',this)">[译] ' + targetLang + '</button>';
+                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#1a4a6a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'bilingual\',this)">[双] ' + targetLang + '-' + langName + '</button>';
+                    h += '</div>';
+                    h += '<div style="flex:1;font-size:13px;color:#ccc;margin-left:8px">';
+                    h += '#' + s.Index + ' <span style="font-size:11px;padding:2px 6px;border-radius:3px;background:' + tagBg + ';color:' + tagColor + '">' + langName + '</span>' + mismatchHint;
+                    h += ' <span style="font-size:11px;padding:2px 6px;border-radius:3px;background:#333;color:#aaa">' + codec + '</span>';
+                    h += ' <span style="font-size:11px;color:#888">' + isExternal + (title ? ' | ' + title : '') + '</span>';
+                    h += '</div></div></div>';
+                });
+                document.getElementById('subtitleList').innerHTML = h;
+            }
+
+            // ======== 翻译操作 ========
+            var _translating = false;
+            function doTranslate(itemId, subIdx, mode, btn) {
+                if (_translating) return;
+                _translating = true;
+                var origText = btn.innerHTML;
+                btn.innerHTML = '[...] ...';
+                btn.disabled = true;
+                var ts = document.getElementById('translateStatus');
+                ts.style.color = '#8cf';
+                ts.textContent = mode === 'original' ? '[...] 正在保存原字幕...' : (mode === 'translated' ? '[...] 正在启动翻译任务...' : '[...] 正在启动双语翻译任务...');
+                document.getElementById('progressWrap').style.display = 'block';
+                document.getElementById('progressFill').style.width = '10%';
+                document.getElementById('progressText').textContent = '正在处理...';
+
+                var prog = 10;
+                var progTimer = setInterval(function() {
+                    prog += Math.random() * 3;
+                    if (prog > 70) prog = 70;
+                    document.getElementById('progressFill').style.width = prog + '%';
+                }, 3000);
+
+                var token = ApiClient.accessToken();
+                var userId = ApiClient.getCurrentUserId();
+                var targetLang = document.getElementById('targetLanguage').value;
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', ApiClient.getUrl('/AITranslator/Subtitle/TranslateAndSave'), true);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function() {
+                    clearInterval(progTimer);
+                    _translating = false;
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            var r = JSON.parse(xhr.responseText);
+                            ts.style.color = '#8f8';
+                            var modeLabel = mode === 'original' ? '原字幕' : (mode === 'translated' ? targetLang + ' 翻译' : targetLang + ' 双语');
+                            ts.innerHTML = '[OK] ' + (r.Message || '完成') + '<br><small>' + modeLabel + ' - 刷新媒体库后播放时选择对应字幕轨道</small>';
+                            document.getElementById('progressFill').style.width = '100%';
+                            document.getElementById('progressText').textContent = '[OK] 完成!';
+                            // 保存到 localStorage
+                            var taskId = r.TaskId;
+                            if (taskId) {
+                                var tasks = JSON.parse(localStorage.getItem('aitranslator_tasks') || '[]');
+                                tasks.push({ taskId: taskId, itemId: itemId, itemName: selectedItemName, mode: mode, status: 'running', startTime: Date.now(), targetLanguage: targetLang });
+                                localStorage.setItem('aitranslator_tasks', JSON.stringify(tasks.slice(-20)));
+                            }
+                            // 立即刷新进度面板
+                            loadGlobalProgress();
+                            // 刷新媒体库
+                            var rx = new XMLHttpRequest();
+                            rx.open('POST', ApiClient.getUrl('/Items/' + itemId + '/Refresh'), true);
+                            rx.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                            rx.setRequestHeader('Content-Type', 'application/json');
+                            rx.send('{}');
+                        } catch(e) {
+                            ts.style.color = '#f88'; ts.textContent = '[ERR] 响应解析错误';
+                            document.getElementById('progressWrap').style.display = 'none';
+                        }
+                    } else {
+                        ts.style.color = '#f88'; ts.textContent = '[ERR] 请求失败 (' + xhr.status + ')';
+                        document.getElementById('progressWrap').style.display = 'none';
+                    }
+                };
+                xhr.onerror = function() {
+                    clearInterval(progTimer);
+                    _translating = false;
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                    ts.style.color = '#f88'; ts.textContent = '[ERR] 网络错误';
+                    document.getElementById('progressWrap').style.display = 'none';
+                };
+                xhr.send(JSON.stringify({ItemId: itemId, UserId: userId, SubtitleIndex: subIdx, Format: 'srt', Mode: mode, TargetLanguage: targetLang}));
+            }
+
+            function langNameMap(code) {
+                var map = {eng:'英文', chi:'中文', zho:'中文', spa:'西班牙文', fra:'法语', deu:'德语', jpn:'日文', kor:'韩文', rus:'俄文', por:'葡萄牙语', ara:'阿拉伯语', ita:'意大利语', en:'英文', zh:'中文', ja:'日文', ko:'韩文', de:'德语', fr:'法语', es:'西班牙语', ru:'俄文', pt:'葡萄牙语', ar:'阿拉伯语'};
+                return map[code] || code;
+            }
+        </script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>Jellyfin.Plugin.AITranslator</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.AITranslator</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Reference Include="MediaBrowser.Common" HintPath="/tmp/jellyfin-libs/MediaBrowser.Common.dll" />
+    <Reference Include="MediaBrowser.Controller" HintPath="/tmp/jellyfin-libs/MediaBrowser.Controller.dll" />
+    <Reference Include="MediaBrowser.Model" HintPath="/tmp/jellyfin-libs/MediaBrowser.Model.dll" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Plugin.cs" />
+    <Compile Include="Properties/AssemblyInfo.cs" />
+    <Compile Include="Configuration/PluginConfiguration.cs" />
+    <Compile Include="SubtitleProcessing/Models/SubtitleEntry.cs" />
+    <Compile Include="SubtitleProcessing/SubtitleParser.cs" />
+    <Compile Include="SubtitleProcessing/SubtitleWriter.cs" />
+    <Compile Include="Services/ITranslationService.cs" />
+    <Compile Include="Services/DeepSeekTranslationService.cs" />
+    <Compile Include="Services/OpenAITranslationService.cs" />
+    <Compile Include="Services/OllamaTranslationService.cs" />
+    <Compile Include="Services/TranslationServiceFactory.cs" />
+    <Compile Include="Api/AISubtitleController.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration\configPage.html" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,19 @@
+{
+  "id": "3BE29809-6E1A-4D01-8B20-67A0B1A3C9F8",
+  "name": "AI Translator",
+  "description": "AI-powered subtitle translation using DeepSeek, OpenAI, or Ollama. Translates SRT, VTT, and ASS subtitle formats to any language.",
+  "overview": "Translate subtitles automatically using AI services like DeepSeek, OpenAI, or local Ollama models. Batch processing with configurable batch sizes. Supports SRT, WebVTT, and ASS subtitle formats.",
+  "owner": "Jellyfin Community",
+  "category": "Subtitles",
+  "imageUrl": "https://raw.githubusercontent.com/jellyfin/jellyfin-ai-translator/main/logo.png",
+  "versions": [
+    {
+      "version": "1.0.0.0",
+      "changelog": "Initial release: AI-powered subtitle translation with DeepSeek, OpenAI, and Ollama support. Configurable batch size, model selection, and target language.",
+      "targetAbi": "10.7.5.0",
+      "sourceUrl": "https://github.com/jellyfin/jellyfin-ai-translator",
+      "timestamp": "2025-04-24T00:00:00Z",
+      "checksum": ""
+    }
+  ]
+}
