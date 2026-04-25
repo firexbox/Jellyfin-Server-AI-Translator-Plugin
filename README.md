@@ -43,4 +43,4 @@ Jellyfin 服务端 AI 字幕翻译插件
 - .NET 9.0 Runtime
 
 ## 版本
-1.0.1 - 支持 Linux / macOS / Windows 三平台
+1.0.1 - 支持 Linux（10.11.8版测试通过） / macOS ARM（10.11.8版测试通过） / Windows(未测试) 三平台
