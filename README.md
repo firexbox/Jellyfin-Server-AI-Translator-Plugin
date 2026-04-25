@@ -115,5 +115,13 @@ cat ~/Library/Application\ Support/jellyfin/log/log_*.log | grep "AI Translator"
 - Jellyfin 10.11+
 - .NET 9.0 Runtime
 
+## 测试环境
+
+| 平台 | 环境 | Jellyfin 版本 | 状态 |
+|------|------|--------------|------|
+| Linux (Docker) | Ubuntu 24.04, jellyfin/jellyfin:10.11.8 | 10.11.8 | [OK] 测试通过 |
+| macOS | macOS ARM, 官方 .app | 10.11.8 | [OK] 测试通过 |
+| Windows | - | - | 未测试 |
+
 ## 版本
-1.0.1 - 支持 Linux（docker jellyfin/jellyfin:10.11.8版测试通过） / macOS ARM（10.11.8版测试通过） / Windows(未测试) 三平台
+1.0.1 - 支持 Linux / macOS / Windows 三平台
