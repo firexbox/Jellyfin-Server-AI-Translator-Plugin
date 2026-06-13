@@ -254,7 +254,7 @@
                 if (q.length < 2) { document.getElementById('searchResults').innerHTML = '<div style="color:#888;padding:12px">输入至少2个字符</div>'; return; }
                 document.getElementById('searchResults').innerHTML = '<div style="color:#888;padding:12px">搜索中...</div>';
                 var token = ApiClient.accessToken();
-                var searchUrl = '/Items?Recursive=true&SearchTerm=' + encodeURIComponent(q) + '&Limit=20&IncludeItemTypes=Episode,Movie';
+                var searchUrl = '/Items?Recursive=true&SearchTerm=' + encodeURIComponent(q) + '&Limit=20&IncludeItemTypes=Episode,Movie&Fields=Path';
                 var xhr = new XMLHttpRequest();
                 xhr.open('GET', ApiClient.getUrl(searchUrl), true);
                 xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
@@ -266,7 +266,7 @@
                             if (items.length) { renderSearchResults(items); return; }
                         } catch(e) {}
                     }
-                    var fallbackUrl = '/Items?Recursive=true&Limit=50&IncludeItemTypes=Episode,Movie';
+                    var fallbackUrl = '/Items?Recursive=true&Limit=50&IncludeItemTypes=Episode,Movie&Fields=Path';
                     var xhr2 = new XMLHttpRequest();
                     xhr2.open('GET', ApiClient.getUrl(fallbackUrl), true);
                     xhr2.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
