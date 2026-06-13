@@ -19,6 +19,29 @@
                     <div id="globalProgressList"></div>
                 </div>
 
+                <hr style="border:none;border-top:1px solid #333;margin:2em 0" />
+
+                <h2>🌐 一键翻译字幕</h2>
+                <div class="inputContainer" style="max-width:600px">
+                    <input is="emby-input" type="text" id="searchInput" label="搜索视频" onkeypress="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnSearch').click()}" />
+                    <div class="fieldDescription">输入视频名称，按回车或点击搜索</div>
+                </div>
+                <button is="emby-button" type="button" id="btnSearch" class="raised">🔍 搜索</button>
+
+                <div id="searchResults" style="margin-top:1em"></div>
+
+                <div id="translatePanel" style="display:none;margin-top:1.5em">
+                    <h3 id="selectedTitle" style="margin-bottom:1em"></h3>
+                    <div id="subtitleList"></div>
+                    <div id="translateStatus" style="font-size:13px;margin-top:1em;min-height:1.2em"></div>
+                    <div id="progressWrap" style="display:none;margin-top:1em;background:#1c1c1c;border-radius:6px;padding:16px">
+                        <div class="progressBar" style="background:#333;border-radius:4px;height:6px;overflow:hidden">
+                            <div id="progressFill" style="background:#00a4dc;border-radius:4px;height:100%;width:0%;transition:width .3s"></div>
+                        </div>
+                        <div id="progressText" style="color:#888;text-align:center;margin-top:8px;font-size:13px"></div>
+                    </div>
+                </div>
+
                 <h2>[ 设置 ]</h2>
                 <form class="configForm" style="max-width:800px">
                     <div class="inputContainer">
@@ -65,29 +88,6 @@
                         <span id="statusMsg" style="font-size:13px"></span>
                     </div>
                 </form>
-
-                <hr style="border:none;border-top:1px solid #333;margin:2em 0" />
-
-                <h2>🌐 一键翻译字幕</h2>
-                <div class="inputContainer" style="max-width:600px">
-                    <input is="emby-input" type="text" id="searchInput" label="搜索视频" onkeypress="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnSearch').click()}" />
-                    <div class="fieldDescription">输入视频名称，按回车或点击搜索</div>
-                </div>
-                <button is="emby-button" type="button" id="btnSearch" class="raised">🔍 搜索</button>
-
-                <div id="searchResults" style="margin-top:1em"></div>
-
-                <div id="translatePanel" style="display:none;margin-top:1.5em">
-                    <h3 id="selectedTitle" style="margin-bottom:1em"></h3>
-                    <div id="subtitleList"></div>
-                    <div id="translateStatus" style="font-size:13px;margin-top:1em;min-height:1.2em"></div>
-                    <div id="progressWrap" style="display:none;margin-top:1em;background:#1c1c1c;border-radius:6px;padding:16px">
-                        <div class="progressBar" style="background:#333;border-radius:4px;height:6px;overflow:hidden">
-                            <div id="progressFill" style="background:#00a4dc;border-radius:4px;height:100%;width:0%;transition:width .3s"></div>
-                        </div>
-                        <div id="progressText" style="color:#888;text-align:center;margin-top:8px;font-size:13px"></div>
-                    </div>
-                </div>
 
                 <!-- 时间轴调整对话框 -->
                 <div id="adjustModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
