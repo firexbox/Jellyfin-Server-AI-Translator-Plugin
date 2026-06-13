@@ -401,7 +401,13 @@ public class AISubtitleController : ControllerBase
 
         var s = text.Substring(0, Math.Min(text.Length, 200));
 
-        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u4e00-\u9fff\u3400-\u4dbf]"))
+        // Detect mixed Chinese + English first (bilingual subtitles)
+        var hasCJK = System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u4e00-\u9fff\u3400-\u4dbf]");
+        var hasLatin = System.Text.RegularExpressions.Regex.IsMatch(s, @"[a-zA-Z]{2,}");
+        if (hasCJK && hasLatin)
+            return new LanguageResult { Code = "zh-en", Name = "中英" };
+
+        if (hasCJK)
             return new LanguageResult { Code = "zh", Name = "中文" };
         if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u3040-\u309f\u30a0-\u30ff]"))
             return new LanguageResult { Code = "ja", Name = "日文" };
@@ -767,6 +773,7 @@ public class AISubtitleController : ControllerBase
         {
             ["eng"] = "\u82f1\u6587", ["en"] = "\u82f1\u6587",
             ["chi"] = "\u4e2d\u6587", ["zho"] = "\u4e2d\u6587", ["zh"] = "\u4e2d\u6587",
+            ["zh-en"] = "\u4e2d\u82f1", ["en-zh"] = "\u4e2d\u82f1",
             ["jpn"] = "\u65e5\u6587", ["ja"] = "\u65e5\u6587",
             ["kor"] = "\u97e9\u6587", ["ko"] = "\u97e9\u6587",
             ["deu"] = "\u5fb7\u8bed", ["de"] = "\u5fb7\u8bed",
