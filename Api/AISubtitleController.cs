@@ -52,6 +52,7 @@ public class AISubtitleController : ControllerBase
             var streams = mediaSources.GetProperty("MediaStreams").EnumerateArray();
             bool indexFound = false;
             string? subtitleCodec = null;
+            string? streamLanguage = null;
             foreach (var stream in streams)
             {
                 if (stream.TryGetProperty("Type", out var typeProp) && typeProp.GetString() == "Subtitle")
@@ -60,6 +61,7 @@ public class AISubtitleController : ControllerBase
                     {
                         indexFound = true;
                         subtitleCodec = stream.TryGetProperty("Codec", out var cp) ? cp.GetString() : null;
+                        streamLanguage = stream.TryGetProperty("Language", out var lp) ? lp.GetString() : null;
                         break;
                     }
                 }
@@ -88,11 +90,41 @@ public class AISubtitleController : ControllerBase
             if (entries.Count == 0)
                 return BadRequest(new { Error = "\u65e0\u6cd5\u89e3\u6790\u5b57\u5e55\u5185\u5bb9" });
 
-            // Detect source language by AI sampling
+            // Detect source language: quick Unicode → Jellyfin metadata → AI fallback
             var sampleText = string.Join("\n", entries.Take(5).Select(e => e.Text));
-            var detectedLang = await DetectLanguageAsync(sampleText, cancellationToken);
-            var sourceLangName = detectedLang.Name;
-            var sourceLangCode = detectedLang.Code;
+            var quickResult = QuickDetectLanguage(sampleText);
+            string sourceLangName, sourceLangCode;
+
+            if (quickResult.Code != "??")
+            {
+                sourceLangName = LangNameToChinese(quickResult.Code) ?? quickResult.Name;
+                sourceLangCode = quickResult.Code;
+            }
+            else
+            {
+                // Try Jellyfin metadata first
+                if (!string.IsNullOrWhiteSpace(streamLanguage))
+                {
+                    sourceLangName = LangNameToChinese(streamLanguage) ?? streamLanguage;
+                    sourceLangCode = streamLanguage;
+                }
+                else
+                {
+                    sourceLangName = "Unknown";
+                    sourceLangCode = "??";
+                }
+                // If still unknown, fall back to AI
+                if (sourceLangCode == "??" || sourceLangCode == "und")
+                {
+                    try
+                    {
+                        var detectedLang = await DetectLanguageAsync(sampleText, cancellationToken);
+                        sourceLangName = LangNameToChinese(detectedLang.Code) ?? detectedLang.Name;
+                        sourceLangCode = detectedLang.Code;
+                    }
+                    catch { }
+                }
+            }
 
             var targetLang = !string.IsNullOrWhiteSpace(request.TargetLanguage)
                 ? request.TargetLanguage
@@ -199,7 +231,7 @@ public class AISubtitleController : ControllerBase
                         var bilingualContent = WriteSrtDirect(bilingualEntries);
                         var savedPath = TrySaveToMediaDir(capturedMediaDir, capturedVideoName,
                             $".{LangCode(capturedTargetLang)}-{capturedSourceCode}.{capturedFormat}", bilingualContent);
-                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, LangCode(capturedTargetLang), CancellationToken.None);
+                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, capturedSourceCode, CancellationToken.None);
                         var msg2 = savedPath != null
                             ? $"已生成 {capturedTargetLang}-{capturedSourceLang} 双语字幕"
                             : $"已通过 API 上传 {capturedTargetLang}-{capturedSourceLang} 双语字幕 (媒体目录不可写)";
