@@ -418,7 +418,7 @@ public class AISubtitleController : ControllerBase
             if (string.IsNullOrWhiteSpace(extContent))
                 return BadRequest(new { Error = "无法获取待调整字幕内容" });
 
-            // Get reference subtitle content — try native codec first, fallback to srt
+            // Get reference subtitle content — skip bitmap codecs, try native codec first
             var refIndex = request.ReferenceSubtitleIndex;
             var refCodec = "srt";
             // Find the reference subtitle in MediaStreams to get its codec
@@ -431,6 +431,12 @@ public class AISubtitleController : ControllerBase
                     break;
                 }
             }
+
+            // Reject bitmap subtitle codecs early
+            var bitmapCodecs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "pgssub", "hdmv_pgs", "dvdsub", "vobsub", "dvbsub", "xsub" };
+            if (bitmapCodecs.Contains(refCodec))
+                return BadRequest(new { Error = $"参考字幕 #{refIndex} 为位图格式 ({refCodec})，无法提取时间轴。请选择文字格式的内嵌字幕作为参考（如 SRT/ASS）" });
 
             string? refContent = null;
             // Try formats in order: native codec → srt → ass → vtt

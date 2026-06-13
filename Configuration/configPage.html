@@ -510,11 +510,21 @@
                 _adjustData.itemId = itemId;
                 _adjustData.subIdx = subIdx;
 
-                // Find first embedded subtitle as reference
+                // Find first embedded TEXT subtitle as reference (skip bitmap codecs)
                 var subs = _cachedSubs || [];
                 var refIdx = -1;
+                var BITMAP_CODECS = ['pgssub','dvdsub','dvbsub','xsub','hdmv_pgs','vobsub'];
                 for (var i = 0; i < subs.length; i++) {
-                    if (!subs[i].IsExternal) { refIdx = subs[i].Index; break; }
+                    if (!subs[i].IsExternal) {
+                        var codec = (subs[i].Codec || '').toLowerCase();
+                        if (BITMAP_CODECS.indexOf(codec) < 0) { refIdx = subs[i].Index; break; }
+                    }
+                }
+                if (refIdx < 0) {
+                    // Try again without bitmap filter (at least show error from backend)
+                    for (var i = 0; i < subs.length; i++) {
+                        if (!subs[i].IsExternal) { refIdx = subs[i].Index; break; }
+                    }
                 }
                 if (refIdx < 0) {
                     alert('未找到内嵌参考字幕，无法调整时间轴');
