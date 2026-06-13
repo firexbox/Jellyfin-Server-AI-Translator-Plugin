@@ -418,12 +418,40 @@ public class AISubtitleController : ControllerBase
             if (string.IsNullOrWhiteSpace(extContent))
                 return BadRequest(new { Error = "无法获取待调整字幕内容" });
 
-            // Get reference subtitle content (embedded, default to first embedded sub)
+            // Get reference subtitle content — try native codec first, fallback to srt
             var refIndex = request.ReferenceSubtitleIndex;
-            var refSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{refIndex}/Stream.{format}";
-            var refContent = await GetStringAsync(refSubUrl, token, ct);
+            var refCodec = "srt";
+            // Find the reference subtitle in MediaStreams to get its codec
+            foreach (var stream in mediaSources.GetProperty("MediaStreams").EnumerateArray())
+            {
+                if (stream.TryGetProperty("Type", out var t) && t.GetString() == "Subtitle"
+                    && stream.TryGetProperty("Index", out var idxProp) && idxProp.GetInt32() == refIndex)
+                {
+                    refCodec = stream.TryGetProperty("Codec", out var cp) ? (cp.GetString() ?? "srt") : "srt";
+                    break;
+                }
+            }
+
+            string? refContent = null;
+            // Try formats in order: native codec → srt → ass → vtt
+            var tryFormats = new[] { refCodec, "srt", "ass", "vtt" }.Distinct().ToArray();
+            string? lastError = null;
+            foreach (var tryFormat in tryFormats)
+            {
+                try
+                {
+                    var refSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{refIndex}/Stream.{tryFormat}";
+                    refContent = await GetStringAsync(refSubUrl, token, ct);
+                    if (!string.IsNullOrWhiteSpace(refContent)) break;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex.Message;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(refContent))
-                return BadRequest(new { Error = $"无法获取参考字幕内容 (索引 {refIndex})" });
+                return BadRequest(new { Error = $"无法获取参考字幕 (索引 {refIndex}, 尝试格式 {string.Join("/", tryFormats)}): {lastError}" });
 
             // Parse both
             var extEntries = SubtitleParser.Parse(extContent);
