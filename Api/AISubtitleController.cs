@@ -543,7 +543,7 @@ public class AISubtitleController : ControllerBase
 
             if (request.ManualOffsetSeconds != null)
             {
-                appliedOffset = -request.ManualOffsetSeconds.Value; // negate: user enters "delay 2s" → shift -2s
+                appliedOffset = request.ManualOffsetSeconds.Value; // user enters delay +N or advance -N directly
                 var absOff = Math.Abs(request.ManualOffsetSeconds.Value);
                 var dir = request.ManualOffsetSeconds.Value >= 0 ? "延后" : "提前";
                 offsetDisplay = $"[手动] {dir} {absOff:F1} 秒";
