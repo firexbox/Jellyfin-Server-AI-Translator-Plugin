@@ -266,7 +266,7 @@ public class AISubtitleController : ControllerBase
     {
         var token = GetTokenFromHeader();
         if (string.IsNullOrWhiteSpace(token))
-            return BadRequest(new { Error = "\u65e0\u6cd5\u83b7\u53d6\u8ba4\u8bc1 Token" });
+            return BadRequest(new { Error = "无法获取认证 Token" });
 
         try
         {
@@ -274,14 +274,15 @@ public class AISubtitleController : ControllerBase
             var doc = JsonDocument.Parse(playbackInfo);
             var mediaSources = doc.RootElement.GetProperty("MediaSources").EnumerateArray().FirstOrDefault();
             if (mediaSources.ValueKind == JsonValueKind.Undefined)
-                return BadRequest(new { Error = "\u65e0\u6cd5\u83b7\u53d6\u5a92\u4f53\u4fe1\u606f" });
+                return BadRequest(new { Error = "无法获取媒体信息" });
 
             var sourceId = mediaSources.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? itemId : itemId;
             var streams = mediaSources.GetProperty("MediaStreams").EnumerateArray()
                 .Where(s => s.TryGetProperty("Type", out var t) && t.GetString() == "Subtitle")
                 .ToList();
 
-            var results = new List<SubtitleLanguageInfo>();
+            // Phase 1: collect metadata + quick local detection (parallel fetch)
+            var infos = new List<(SubtitleLanguageInfo Info, string Sample, bool NeedAI)>();
             foreach (var stream in streams)
             {
                 var idx = stream.GetProperty("Index").GetInt32();
@@ -290,8 +291,11 @@ public class AISubtitleController : ControllerBase
                 var title = stream.TryGetProperty("Title", out var tp) ? tp.GetString() : null;
                 var isExternal = stream.TryGetProperty("IsExternal", out var ep) && ep.GetBoolean();
 
-                var detectedName = LangNameToChinese(jfLang) ?? jfLang ?? "Unknown";
-                var detectedCode = jfLang ?? "??";
+                var quickResult = QuickDetectFromJellyfin(jfLang);
+                var detectedName = quickResult.Name;
+                var detectedCode = quickResult.Code;
+                var sample = "";
+                var needAI = false;
 
                 try
                 {
@@ -299,38 +303,96 @@ public class AISubtitleController : ControllerBase
                     var content = await GetStringAsync(subUrl, token, ct);
                     if (!string.IsNullOrWhiteSpace(content))
                     {
-                        var sample = ExtractSample(content);
+                        sample = ExtractSample(content);
                         if (sample.Length > 5)
                         {
-                            var detected = await DetectLanguageAsync(sample, ct);
-                            detectedName = LangNameToChinese(detected.Code) ?? detected.Name;
-                            detectedCode = detected.Code;
+                            var localResult = QuickDetectLanguage(sample);
+                            if (localResult.Code != "??")
+                            {
+                                // Unicode check succeeded — use it
+                                detectedName = LangNameToChinese(localResult.Code) ?? localResult.Name;
+                                detectedCode = localResult.Code;
+                            }
+                            else if (string.IsNullOrWhiteSpace(jfLang) || jfLang == "und")
+                            {
+                                // No Jellyfin tag and Unicode failed — need AI
+                                needAI = true;
+                            }
+                            // else: Unicode failed but Jellyfin tag exists — trust Jellyfin
                         }
                     }
                 }
-                catch
-                {
-                    // \u4fdd\u7559 Jellyfin \u539f\u59cb\u8bed\u8a00\u4fe1\u606f
-                }
+                catch { }
 
-                results.Add(new SubtitleLanguageInfo
+                infos.Add((new SubtitleLanguageInfo
                 {
-                    Index = idx,
-                    JellyfinLanguage = jfLang,
-                    DetectedName = detectedName,
-                    DetectedCode = detectedCode,
-                    Codec = codec,
-                    IsExternal = isExternal,
-                    Title = title
-                });
+                    Index = idx, JellyfinLanguage = jfLang,
+                    DetectedName = detectedName, DetectedCode = detectedCode,
+                    Codec = codec, IsExternal = isExternal, Title = title
+                }, sample, needAI));
             }
 
-            return Ok(results);
+            // Phase 2: run AI detection in parallel for those that need it
+            var aiTasks = infos
+                .Where(x => x.NeedAI && x.Sample.Length > 5)
+                .Select(async x =>
+                {
+                    try
+                    {
+                        var detected = await DetectLanguageAsync(x.Sample, ct);
+                        x.Info.DetectedName = LangNameToChinese(detected.Code) ?? detected.Name;
+                        x.Info.DetectedCode = detected.Code;
+                    }
+                    catch { }
+                });
+
+            await Task.WhenAll(aiTasks);
+
+            return Ok(infos.Select(x => x.Info).ToList());
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { Error = $"\u68c0\u6d4b\u5931\u8d25: {ex.Message}" });
+            return StatusCode(500, new { Error = $"检测失败: {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// Fast Unicode-range language detection. Returns Code="??" if ambiguous.
+    /// </summary>
+    private static LanguageResult QuickDetectLanguage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return new LanguageResult { Code = "??", Name = "Unknown" };
+
+        var s = text.Substring(0, Math.Min(text.Length, 200));
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u4e00-\u9fff\u3400-\u4dbf]"))
+            return new LanguageResult { Code = "zh", Name = "中文" };
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u3040-\u309f\u30a0-\u30ff]"))
+            return new LanguageResult { Code = "ja", Name = "日文" };
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\uac00-\ud7af]"))
+            return new LanguageResult { Code = "ko", Name = "韩文" };
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u0400-\u04ff]"))
+            return new LanguageResult { Code = "ru", Name = "俄文" };
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u0600-\u06ff]"))
+            return new LanguageResult { Code = "ar", Name = "阿拉伯文" };
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u0e00-\u0e7f]"))
+            return new LanguageResult { Code = "th", Name = "泰文" };
+
+        // Latin-script languages: check for specific accented chars
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[áéíóúñüçàèìòù]"))
+            return new LanguageResult { Code = "??", Name = "拉丁语系" }; // ambiguous, need AI
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[a-zA-Z]{3,}"))
+            return new LanguageResult { Code = "en", Name = "英文" };
+
+        return new LanguageResult { Code = "??", Name = "Unknown" };
+    }
+
+    private static LanguageResult QuickDetectFromJellyfin(string? jfLang)
+    {
+        var name = LangNameToChinese(jfLang) ?? jfLang ?? "Unknown";
+        var code = jfLang ?? "??";
+        return new LanguageResult { Code = code, Name = name };
     }
 
     [HttpPost("Subtitle/AdjustTiming")]
