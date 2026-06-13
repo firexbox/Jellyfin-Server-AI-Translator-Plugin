@@ -51,6 +51,7 @@ public class AISubtitleController : ControllerBase
 
             var streams = mediaSources.GetProperty("MediaStreams").EnumerateArray();
             bool indexFound = false;
+            string? subtitleCodec = null;
             foreach (var stream in streams)
             {
                 if (stream.TryGetProperty("Type", out var typeProp) && typeProp.GetString() == "Subtitle")
@@ -58,13 +59,20 @@ public class AISubtitleController : ControllerBase
                     if (stream.TryGetProperty("Index", out var idxProp) && idxProp.GetInt32() == request.SubtitleIndex)
                     {
                         indexFound = true;
+                        subtitleCodec = stream.TryGetProperty("Codec", out var cp) ? cp.GetString() : null;
                         break;
                     }
                 }
             }
 
             if (!indexFound)
-                return BadRequest(new { Error = $"\u672a\u627e\u5230\u5b57\u5e55\u8f68\u9053\u7d22\u5f15 {request.SubtitleIndex}" });
+                return BadRequest(new { Error = $"未找到字幕轨道索引 {request.SubtitleIndex}" });
+
+            // Reject bitmap subtitle codecs
+            var bitmapCodecs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "pgssub", "hdmv_pgs", "dvdsub", "vobsub", "dvbsub", "xsub" };
+            if (subtitleCodec != null && bitmapCodecs.Contains(subtitleCodec))
+                return BadRequest(new { Error = $"字幕 #{request.SubtitleIndex} 为位图格式 ({subtitleCodec})，无法提取文字进行翻译" });
 
             var format = request.Format ?? "srt";
             var subUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{request.SubtitleIndex}/Stream.{format}";

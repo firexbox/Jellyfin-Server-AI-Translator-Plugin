@@ -366,10 +366,13 @@
                 xhr.send();
             }
 
+            var BITMAP_CODECS = ['pgssub','dvdsub','dvbsub','xsub','hdmv_pgs','vobsub'];
             function renderSubtitleList(itemId, subs, langResults) {
                 var h = '';
                 var targetLang = document.getElementById('targetLanguage').value;
                 subs.forEach(function(s) {
+                    // Skip bitmap subtitle codecs (PGS, DVDSUB, etc.) — can't extract text
+                    if (BITMAP_CODECS.indexOf((s.Codec || '').toLowerCase()) >= 0) return;
                     var langResult = null;
                     for (var i = 0; i < langResults.length; i++) {
                         if (langResults[i].Index === s.Index) { langResult = langResults[i]; break; }
@@ -513,7 +516,6 @@
                 // Find first embedded TEXT subtitle as reference (skip bitmap codecs)
                 var subs = _cachedSubs || [];
                 var refIdx = -1;
-                var BITMAP_CODECS = ['pgssub','dvdsub','dvbsub','xsub','hdmv_pgs','vobsub'];
                 for (var i = 0; i < subs.length; i++) {
                     if (!subs[i].IsExternal) {
                         var codec = (subs[i].Codec || '').toLowerCase();
