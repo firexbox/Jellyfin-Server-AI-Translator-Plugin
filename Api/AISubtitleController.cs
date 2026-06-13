@@ -230,8 +230,8 @@ public class AISubtitleController : ControllerBase
                         }
                         var bilingualContent = WriteSrtDirect(bilingualEntries);
                         var savedPath = TrySaveToMediaDir(capturedMediaDir, capturedVideoName,
-                            $".{LangCode(capturedTargetLang)}-{capturedSourceCode}.{capturedFormat}", bilingualContent);
-                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, capturedSourceCode, CancellationToken.None);
+                            $".{LangCode(capturedTargetLang)}-{NormalizeLangCode(capturedSourceCode)}.{capturedFormat}", bilingualContent);
+                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, NormalizeLangCode(capturedSourceCode), CancellationToken.None);
                         var msg2 = savedPath != null
                             ? $"已生成 {capturedTargetLang}-{capturedSourceLang} 双语字幕"
                             : $"已通过 API 上传 {capturedTargetLang}-{capturedSourceLang} 双语字幕 (媒体目录不可写)";
@@ -803,14 +803,39 @@ public class AISubtitleController : ControllerBase
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["\u4e2d\u6587"] = "chi", ["Chinese"] = "chi", ["\u65e5\u6587"] = "jpn", ["Japanese"] = "jpn",
-            ["\u5fb7\u8bed"] = "deu", ["German"] = "deu", ["\u97e9\u6587"] = "kor", ["Korean"] = "kor",
-            ["\u897f\u73ed\u7259\u8bed"] = "spa", ["Spanish"] = "spa", ["\u6cd5\u8bed"] = "fra", ["French"] = "fra",
-            ["\u82f1\u6587"] = "eng", ["English"] = "eng", ["\u4fc4\u8bed"] = "rus", ["Russian"] = "rus",
-            ["\u8461\u8404\u7259\u8bed"] = "por", ["Portuguese"] = "por", ["\u963f\u62c9\u4f2f\u8bed"] = "ara", ["Arabic"] = "ara",
-            ["\u610f\u5927\u5229\u8bed"] = "ita", ["Italian"] = "ita"
+            ["中文"] = "chi", ["Chinese"] = "chi", ["日文"] = "jpn", ["Japanese"] = "jpn",
+            ["德语"] = "deu", ["German"] = "deu", ["韩文"] = "kor", ["Korean"] = "kor",
+            ["西班牙语"] = "spa", ["Spanish"] = "spa", ["法语"] = "fra", ["French"] = "fra",
+            ["英文"] = "eng", ["English"] = "eng", ["俄语"] = "rus", ["Russian"] = "rus",
+            ["葡萄牙语"] = "por", ["Portuguese"] = "por", ["阿拉伯语"] = "ara", ["Arabic"] = "ara",
+            ["意大利语"] = "ita", ["Italian"] = "ita"
         };
         return map.TryGetValue(language, out var code) ? code : "chi";
+    }
+
+    /// <summary>
+    /// Normalizes a language code to the 3-letter format Jellyfin expects.
+    /// Handles 2-letter ISO codes (en→eng, zh→chi, ja→jpn, ko→kor, etc.)
+    /// and passes through already-valid 3-letter codes.
+    /// </summary>
+    private static string NormalizeLangCode(string code)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["en"] = "eng", ["eng"] = "eng",
+            ["zh"] = "chi", ["chi"] = "chi", ["zho"] = "chi",
+            ["ja"] = "jpn", ["jpn"] = "jpn",
+            ["ko"] = "kor", ["kor"] = "kor",
+            ["de"] = "deu", ["deu"] = "deu",
+            ["fr"] = "fra", ["fra"] = "fra",
+            ["es"] = "spa", ["spa"] = "spa",
+            ["ru"] = "rus", ["rus"] = "rus",
+            ["pt"] = "por", ["por"] = "por",
+            ["ar"] = "ara", ["ara"] = "ara",
+            ["it"] = "ita", ["ita"] = "ita",
+            ["th"] = "tha", ["tha"] = "tha",
+        };
+        return map.TryGetValue(code, out var result) ? result : code.ToLowerInvariant();
     }
 
     private static string WriteSrtDirect(List<SubtitleEntry> entries)
