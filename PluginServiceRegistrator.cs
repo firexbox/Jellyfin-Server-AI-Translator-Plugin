@@ -1,80 +1,56 @@
+using Jellyfin.Plugin.AITranslator.Api;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.AITranslator;
 
 /// <summary>
 /// Registers plugin services into Jellyfin's DI container.
-/// Uses dual registration strategy to ensure controllers are discoverable
-/// on all platforms (Linux, macOS, Windows) and all Jellyfin build variants.
+/// Discovered automatically by PluginManager via IPluginServiceRegistrator.
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection services, IServerApplicationHost appHost)
     {
-        var pluginAssembly = typeof(Plugin).Assembly;
-        var pluginAssemblyName = pluginAssembly.GetName().Name;
-
-        // Strategy 1: Register IStartupFilter that adds ApplicationPart at app startup time.
-        // This works when MVC is already fully initialized.
-        services.AddSingleton<IStartupFilter>(new AITranslatorStartupFilter(pluginAssembly));
-
-        // Strategy 2: If ApplicationPartManager already exists in services, add directly.
-        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(ApplicationPartManager));
-        if (descriptor?.ImplementationInstance is ApplicationPartManager existingPartManager)
+        // Manually add the global filter to MvcOptions
+        // This runs before MVC is fully configured, so we add a Configure callback
+        services.AddSingleton<IStartupFilter>(sp =>
         {
-            AddPartIfMissing(existingPartManager, pluginAssembly, pluginAssemblyName);
-        }
-    }
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger("AI Translator");
+            return new StartupFilterWithFilter(logger);
+        });
 
-    private static void AddPartIfMissing(ApplicationPartManager partManager, System.Reflection.Assembly assembly, string assemblyName)
-    {
-        if (!partManager.ApplicationParts.Any(p => p.Name == assemblyName))
-        {
-            partManager.ApplicationParts.Add(new AssemblyPart(assembly));
-        }
+        var logger2 = services.BuildServiceProvider()
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("AI Translator");
+        logger2.LogInformation("AI Translator: Service registration complete");
     }
 }
 
 /// <summary>
-/// IStartupFilter that adds the plugin assembly to MVC's ApplicationPartManager
-/// after the DI container is fully built. This ensures compatibility with macOS
-/// and other platforms where early registration may not work.
+/// IStartupFilter that adds our SubtitleTranslationMiddleware to the pipeline.
 /// </summary>
-public class AITranslatorStartupFilter : IStartupFilter
+internal class StartupFilterWithFilter : IStartupFilter
 {
-    private readonly System.Reflection.Assembly _pluginAssembly;
+    private readonly ILogger _logger;
 
-    public AITranslatorStartupFilter(System.Reflection.Assembly pluginAssembly)
+    public StartupFilterWithFilter(ILogger logger)
     {
-        _pluginAssembly = pluginAssembly;
+        _logger = logger;
     }
 
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
     {
         return builder =>
         {
-            try
-            {
-                var partManager = builder.ApplicationServices.GetService<ApplicationPartManager>();
-                if (partManager != null)
-                {
-                    var name = _pluginAssembly.GetName().Name;
-                    if (!partManager.ApplicationParts.Any(p => p.Name == name))
-                    {
-                        partManager.ApplicationParts.Add(new AssemblyPart(_pluginAssembly));
-                    }
-                }
-            }
-            catch
-            {
-                // Ignore - ApplicationPartManager may not be available on all builds
-            }
+            // Middleware disabled - intercepts subtitle API calls which causes issues
+            // with internal Jellyfin subtitle fetching
             next(builder);
         };
     }

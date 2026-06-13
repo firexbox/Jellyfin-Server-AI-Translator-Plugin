@@ -31,7 +31,15 @@
     <Compile Include="Services/OpenAITranslationService.cs" />
     <Compile Include="Services/OllamaTranslationService.cs" />
     <Compile Include="Services/TranslationServiceFactory.cs" />
+    <Compile Include="Api/SubtitleTranslateController.cs" />
+    <Compile Include="Api/SubtitleProxyController.cs" />
+    <Compile Include="Api/SubtitleStreamController.cs" />
     <Compile Include="Api/AISubtitleController.cs" />
+    <Compile Include="Api/SubtitleTranslationFilter.cs" />
+    <Compile Include="Api/SubtitleTranslationMiddleware.cs" />
+    <Compile Include="Api/ServiceRegistrator.cs" />
+    <Compile Include="PluginServiceRegistrator.cs" />
+    <Compile Include="Providers/AITranslateProvider.cs" />
   </ItemGroup>
 
   <ItemGroup>

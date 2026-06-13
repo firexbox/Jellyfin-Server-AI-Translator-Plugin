@@ -260,32 +260,6 @@ public class AISubtitleController : ControllerBase
         }
     }
 
-    [HttpPost("TranslateContent")]
-    public async Task<IActionResult> TranslateContent([FromBody] TranslateContentRequest request, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(_config.ApiKey))
-            return BadRequest(new { Error = "\u8bf7\u5148\u5728\u63d2\u4ef6\u8bbe\u7f6e\u4e2d\u914d\u7f6e API Key" });
-        if (string.IsNullOrWhiteSpace(request?.Content))
-            return BadRequest(new { Error = "No content provided" });
-
-        try
-        {
-            var entries = SubtitleParser.Parse(request.Content);
-            if (entries.Count == 0)
-                return BadRequest(new { Error = "Could not parse subtitle content" });
-
-            var service = TranslationServiceFactory.Create(_config);
-            var translated = await service.TranslateAsync(entries, _config.TargetLanguage, ct);
-            var format = request.Format?.ToLowerInvariant() == "vtt" ? "vtt" : "srt";
-            var result = SubtitleWriter.Write(translated, format);
-            return Ok(new { Content = result });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { Error = ex.Message });
-        }
-    }
-
     [HttpGet("Subtitle/LanguageInfo")]
     public async Task<IActionResult> GetSubtitleLanguageInfo([FromQuery] string itemId, [FromQuery] string userId, CancellationToken ct)
     {
@@ -646,12 +620,6 @@ public class TranslateAndSaveRequest
 public class DetectLanguageRequest
 {
     public string Sample { get; set; } = string.Empty;
-}
-
-public class TranslateContentRequest
-{
-    public string Content { get; set; } = string.Empty;
-    public string Format { get; set; } = "srt";
 }
 
 public class LanguageResult

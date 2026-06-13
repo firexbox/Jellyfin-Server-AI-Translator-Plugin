@@ -1,23 +1,19 @@
 using System.Reflection;
 using Jellyfin.Plugin.AITranslator.Configuration;
 using MediaBrowser.Common.Plugins;
-using MediaBrowser.Controller;
-using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Plugins;
-using Microsoft.AspNetCore.Mvc.ApplicationParts;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.AITranslator
 {
     /// <summary>
     /// Main plugin class for Jellyfin AI Translator.
-    /// Also implements IPluginServiceRegistrator to ensure controller discovery
-    /// on platforms where standalone IPluginServiceRegistrator classes are not found.
+    /// Also serves as a proxy registration point.
     /// </summary>
-    public class Plugin : MediaBrowser.Common.Plugins.IPlugin, IHasPluginConfiguration, IHasWebPages, IPluginServiceRegistrator
+    public class Plugin : MediaBrowser.Common.Plugins.IPlugin, IHasPluginConfiguration, IHasWebPages
     {
         private static readonly Guid PluginId = Guid.Parse("3BE29809-6E1A-4D01-8B20-67A0B1A3C9F8");
         private PluginConfiguration? _configuration;
+        private static bool _servicesRegistered;
 
         public Plugin()
         {
@@ -30,40 +26,71 @@ namespace Jellyfin.Plugin.AITranslator
                 Path.GetDirectoryName(AssemblyFilePath) ?? ".",
                 "AITranslator");
             Id = PluginId;
+
+            // Register MVC filter on first creation - disabled for now
+            // TryRegisterFilter();
         }
 
-        /// <summary>
-        /// Called by Jellyfin's PluginManager via IPluginServiceRegistrator.
-        /// Registers the plugin assembly as an MVC ApplicationPart so controllers
-        /// are discoverable by ASP.NET Core routing on all platforms.
-        /// </summary>
-        public void RegisterServices(IServiceCollection services, IServerApplicationHost appHost)
+        private static void TryRegisterFilter()
         {
-            var pluginAssembly = typeof(Plugin).Assembly;
-            var pluginAssemblyName = pluginAssembly.GetName().Name ?? "Jellyfin.Plugin.AITranslator";
-
+            if (_servicesRegistered) return;
             try
             {
-                // Strategy 1: If ApplicationPartManager already exists, add directly
-                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(ApplicationPartManager));
-                if (descriptor?.ImplementationInstance is ApplicationPartManager existingPartManager)
+                // Try to access the global MVC options through ServiceProvider
+                // This works when Jellyfin's DI has been fully initialized
+                var serviceProvider = GetServiceProvider();
+                if (serviceProvider == null) return;
+
+                var mvcOptions = serviceProvider.GetService(
+                    typeof(Microsoft.AspNetCore.Mvc.MvcOptions));
+                if (mvcOptions is Microsoft.AspNetCore.Mvc.MvcOptions options)
                 {
-                    if (!existingPartManager.ApplicationParts.Any(p => p.Name == pluginAssemblyName))
+                    var loggerFactory = serviceProvider.GetService(
+                        typeof(Microsoft.Extensions.Logging.ILoggerFactory)) 
+                        as Microsoft.Extensions.Logging.ILoggerFactory;
+                    
+                    if (loggerFactory != null)
                     {
-                        existingPartManager.ApplicationParts.Add(new AssemblyPart(pluginAssembly));
+                        var logger = loggerFactory.CreateLogger("AI Translator");
+                        options.Filters.Add(new Api.SubtitleTranslationFilter(logger));
+                        Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(logger, "AI Translator: Subtitle translation filter registered globally");
                     }
                 }
-                else
-                {
-                    // Strategy 2: Create new ApplicationPartManager before Jellyfin's AddMvc uses it
-                    var partManager = new ApplicationPartManager();
-                    partManager.ApplicationParts.Add(new AssemblyPart(pluginAssembly));
-                    services.AddSingleton(partManager);
-                }
+                _servicesRegistered = true;
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine($"AI Translator: Failed to register filter: {ex.Message}");
+            }
+        }
+
+        private static IServiceProvider? GetServiceProvider()
+        {
+            try
+            {
+                // Find the IHost instance from Jellyfin's entry assembly
+                var entryAsm = System.Reflection.Assembly.GetEntryAssembly();
+                if (entryAsm == null) return null;
+
+                var programType = entryAsm.GetType("Jellyfin.Server.Program");
+                if (programType == null) return null;
+
+                // Try to get _jellyfinHost field (private static)
+                var hostField = programType.GetField("_jellyfinHost",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+                if (hostField == null) return null;
+
+                var host = hostField.GetValue(null);
+                if (host == null) return null;
+
+                var servicesProp = host.GetType().GetProperty("Services");
+                if (servicesProp == null) return null;
+
+                return servicesProp.GetValue(host) as IServiceProvider;
             }
             catch
             {
-                // Ignore - ApplicationPartManager may not be available on all builds
+                return null;
             }
         }
 

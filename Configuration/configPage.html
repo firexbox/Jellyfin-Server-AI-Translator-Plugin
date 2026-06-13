@@ -281,9 +281,18 @@
                 var h = '';
                 items.forEach(function (it) {
                     var n = it.Name || '', s = it.SeriesName ? (it.SeriesName + ' - ') : '';
+                    var filePath = it.Path || '';
+                    var pathDisplay = filePath;
+                    // If path is very long, truncate with ellipsis in the middle
+                    if (pathDisplay.length > 80) {
+                        pathDisplay = pathDisplay.substring(0, 40) + '...' + pathDisplay.substring(pathDisplay.length - 37);
+                    }
                     h += '<div class="resultItem" data-id="' + it.Id + '" data-name="' + (s + n).replace(/"/g, '&quot;') + '" style="background:#222;border-radius:6px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">';
-                    h += '<div><div style="color:#fff;font-size:14px;font-weight:500">' + s + n + '</div><div style="color:#888;font-size:12px;margin-top:2px">' + it.Type + (it.ProductionYear ? ' | ' + it.ProductionYear : '') + '</div></div>';
-                    h += '<span style="color:#00a4dc">[&gt;]</span></div>';
+                    h += '<div style="flex:1;min-width:0">';
+                    h += '<div style="color:#fff;font-size:14px;font-weight:500">' + s + n + '</div>';
+                    h += '<div style="color:#888;font-size:12px;margin-top:2px">' + it.Type + (it.ProductionYear ? ' | ' + it.ProductionYear : '') + '</div>';
+                    h += '<div style="color:#555;font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + filePath.replace(/"/g, '&quot;') + '">' + pathDisplay + '</div>';
+                    h += '</div><span style="color:#00a4dc;flex-shrink:0">[&gt;]</span></div>';
                 });
                 document.getElementById('searchResults').innerHTML = h;
                 document.querySelectorAll('.resultItem').forEach(function (el) {
