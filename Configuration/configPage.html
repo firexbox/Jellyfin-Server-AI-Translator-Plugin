@@ -371,8 +371,7 @@
                 var h = '';
                 var targetLang = document.getElementById('targetLanguage').value;
                 subs.forEach(function(s) {
-                    // Skip bitmap subtitle codecs (PGS, DVDSUB, etc.) — can't extract text
-                    if (BITMAP_CODECS.indexOf((s.Codec || '').toLowerCase()) >= 0) return;
+                    var isBitmap = BITMAP_CODECS.indexOf((s.Codec || '').toLowerCase()) >= 0;
                     var langResult = null;
                     for (var i = 0; i < langResults.length; i++) {
                         if (langResults[i].Index === s.Index) { langResult = langResults[i]; break; }
@@ -410,12 +409,17 @@
                     h += '<div style="background:#242424;border-radius:4px;padding:10px 12px;margin-bottom:8px">';
                     h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
                     h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
-                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'original\',this)">[原] 原字幕</button>';
-                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#2a6a2a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'translated\',this)">[译] ' + targetLang + '</button>';
-                    h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#1a4a6a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'bilingual\',this)">[双] ' + targetLang + '-' + langName + '</button>';
-                    // Adjust timing button: only for external subtitles, need a reference (embedded) sub
-                    if (s.IsExternal) {
-                        h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#6a3a1a" onclick="showAdjustTiming(\'' + itemId + '\',' + s.Index + ',\'' + selectedItemName.replace(/'/g, '\\\'') + '\',this)">[调] 调时轴</button>';
+                    if (isBitmap) {
+                        // Bitmap subtitle: show dimmed buttons with error hint
+                        h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;opacity:0.4" onclick="showBitmapError(\'' + (s.Codec || '?') + '\')">[位图] ' + (s.Codec || '?').toUpperCase() + '</button>';
+                    } else {
+                        h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'original\',this)">[原] 原字幕</button>';
+                        h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#2a6a2a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'translated\',this)">[译] ' + targetLang + '</button>';
+                        h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#1a4a6a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'bilingual\',this)">[双] ' + targetLang + '-' + langName + '</button>';
+                        // Adjust timing button: only for external subtitles
+                        if (s.IsExternal) {
+                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#6a3a1a" onclick="showAdjustTiming(\'' + itemId + '\',' + s.Index + ',\'' + selectedItemName.replace(/'/g, '\\\'') + '\',this)">[调] 调时轴</button>';
+                        }
                     }
                     h += '</div>';
                     h += '<div style="flex:1;font-size:13px;color:#ccc;margin-left:8px">';
@@ -644,6 +648,12 @@
             });
 
             var _cachedSubs = null;
+
+            function showBitmapError(codec) {
+                var ts = document.getElementById('translateStatus');
+                ts.style.color = '#fc0';
+                ts.textContent = '[!] ' + (codec || '?').toUpperCase() + ' 为位图格式，无法提取文字进行翻译或调轴';
+            }
 
             function langNameMap(code) {
                 var map = {eng:'英文', chi:'中文', zho:'中文', spa:'西班牙文', fra:'法语', deu:'德语', jpn:'日文', kor:'韩文', rus:'俄文', por:'葡萄牙语', ara:'阿拉伯语', ita:'意大利语', en:'英文', zh:'中文', ja:'日文', ko:'韩文', de:'德语', fr:'法语', es:'西班牙语', ru:'俄文', pt:'葡萄牙语', ar:'阿拉伯语'};
