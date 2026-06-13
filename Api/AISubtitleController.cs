@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -332,6 +333,169 @@ public class AISubtitleController : ControllerBase
         }
     }
 
+    [HttpPost("Subtitle/AdjustTiming")]
+    public async Task<IActionResult> AdjustTiming(
+        [FromBody] AdjustTimingRequest request,
+        CancellationToken ct)
+    {
+        var token = GetTokenFromHeader();
+        if (string.IsNullOrWhiteSpace(token))
+            return BadRequest(new { Error = "无法获取认证 Token" });
+
+        try
+        {
+            // Get media info for video path and source ID
+            var mediaInfo = await GetStringAsync(
+                $"http://localhost:8096/Users/{request.UserId}/Items/{request.ItemId}?Fields=MediaSources",
+                token, ct);
+            var sources = JsonSerializer.Deserialize<JsonElement>(mediaInfo);
+            var mediaSources = sources.GetProperty("MediaSources").EnumerateArray().FirstOrDefault();
+            if (mediaSources.ValueKind == JsonValueKind.Undefined)
+                return BadRequest(new { Error = "无法获取视频媒体信息" });
+
+            var sourceId = mediaSources.GetProperty("Id").GetString() ?? request.ItemId;
+            var videoPath = mediaSources.TryGetProperty("Path", out var pathProp) ? pathProp.GetString() : null;
+
+            // Get external subtitle content (the one to adjust)
+            var format = request.Format ?? "srt";
+            var extSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{request.SubtitleIndex}/Stream.{format}";
+            var extContent = await GetStringAsync(extSubUrl, token, ct);
+            if (string.IsNullOrWhiteSpace(extContent))
+                return BadRequest(new { Error = "无法获取待调整字幕内容" });
+
+            // Get reference subtitle content (embedded, default to first embedded sub)
+            var refIndex = request.ReferenceSubtitleIndex;
+            var refSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{refIndex}/Stream.{format}";
+            var refContent = await GetStringAsync(refSubUrl, token, ct);
+            if (string.IsNullOrWhiteSpace(refContent))
+                return BadRequest(new { Error = $"无法获取参考字幕内容 (索引 {refIndex})" });
+
+            // Parse both
+            var extEntries = SubtitleParser.Parse(extContent);
+            var refEntries = SubtitleParser.Parse(refContent);
+            if (extEntries.Count == 0 || refEntries.Count == 0)
+                return BadRequest(new { Error = "无法解析字幕内容" });
+
+            // Calculate offset using first N entries
+            var sampleCount = Math.Min(Math.Min(extEntries.Count, refEntries.Count), 10);
+            var offsets = new List<double>();
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var extStart = ParseTimestamp(extEntries[i].StartTime);
+                var refStart = ParseTimestamp(refEntries[i].StartTime);
+                if (extStart.HasValue && refStart.HasValue)
+                    offsets.Add((extStart.Value - refStart.Value).TotalSeconds);
+            }
+
+            if (offsets.Count == 0)
+                return BadRequest(new { Error = "无法计算时间偏移" });
+
+            // Use median to avoid outlier influence
+            offsets.Sort();
+            double medianOffset = offsets.Count % 2 == 1
+                ? offsets[offsets.Count / 2]
+                : (offsets[offsets.Count / 2 - 1] + offsets[offsets.Count / 2]) / 2.0;
+
+            var absOffset = Math.Abs(medianOffset);
+            var direction = medianOffset >= 0 ? "延后" : "提前";
+            var offsetDisplay = $"{direction} {absOffset:F3} 秒";
+
+            // Generate preview of first 3 entries
+            var previewBefore = string.Join("\n", extEntries.Take(3).Select(e =>
+                $"{e.Index}\n{e.StartTime} --> {e.EndTime}\n{e.Text}"));
+            var previewAfter = string.Join("\n", extEntries.Take(3).Select(e =>
+            {
+                var newStart = AdjustTimestamp(e.StartTime, -medianOffset);
+                var newEnd = AdjustTimestamp(e.EndTime, -medianOffset);
+                return $"{e.Index}\n{newStart} --> {newEnd}\n{e.Text}";
+            }));
+
+            // If apply mode, actually adjust and save
+            if (request.Apply && !string.IsNullOrWhiteSpace(videoPath))
+            {
+                var mediaDir = System.IO.Path.GetDirectoryName(videoPath) ?? "";
+                var videoName = System.IO.Path.GetFileNameWithoutExtension(videoPath);
+
+                // Adjust all entries
+                var adjusted = extEntries.Select(e => new SubtitleEntry
+                {
+                    Index = e.Index,
+                    StartTime = AdjustTimestamp(e.StartTime, -medianOffset),
+                    EndTime = AdjustTimestamp(e.EndTime, -medianOffset),
+                    Text = e.Text
+                }).ToList();
+
+                var adjustedContent = WriteSrtDirect(adjusted);
+
+                // Save as new file with _adjusted suffix
+                var outPath = System.IO.Path.Combine(mediaDir,
+                    $"{videoName}.adjusted.{format}");
+                await System.IO.File.WriteAllTextAsync(outPath, adjustedContent, ct);
+                try
+                {
+                    System.IO.File.SetUnixFileMode(outPath,
+                        System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite |
+                        System.IO.UnixFileMode.GroupRead | System.IO.UnixFileMode.OtherRead);
+                }
+                catch { }
+
+                // Upload as new subtitle track
+                var langCode = request.Language ?? "chi";
+                await UploadSubtitleAsync(_httpClientFactory, token, request.ItemId,
+                    adjustedContent, format, langCode, ct);
+
+                return Ok(new
+                {
+                    Applied = true,
+                    OffsetSeconds = -medianOffset,
+                    OffsetDisplay = offsetDisplay,
+                    ExternalFirstTimestamp = extEntries[0].StartTime,
+                    ReferenceFirstTimestamp = refEntries[0].StartTime,
+                    TotalEntries = extEntries.Count,
+                    SavedPath = outPath,
+                    Message = $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
+                });
+            }
+
+            return Ok(new
+            {
+                Applied = false,
+                OffsetSeconds = -medianOffset,
+                OffsetDisplay = offsetDisplay,
+                ExternalFirstTimestamp = extEntries[0].StartTime,
+                ReferenceFirstTimestamp = refEntries[0].StartTime,
+                PreviewBefore = previewBefore,
+                PreviewAfter = previewAfter,
+                TotalEntries = extEntries.Count,
+                ReferenceTotalEntries = refEntries.Count,
+                Message = $"检测到偏移 {offsetDisplay}（基于前 {sampleCount} 条字幕）"
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Error = $"调整失败: {ex.Message}" });
+        }
+    }
+
+    private static TimeSpan? ParseTimestamp(string ts)
+    {
+        // Supports "HH:MM:SS,mmm" and "HH:MM:SS.mmm"
+        if (string.IsNullOrWhiteSpace(ts)) return null;
+        ts = ts.Replace(',', '.');
+        if (TimeSpan.TryParse(ts, CultureInfo.InvariantCulture, out var result))
+            return result;
+        return null;
+    }
+
+    private static string AdjustTimestamp(string ts, double offsetSeconds)
+    {
+        var parsed = ParseTimestamp(ts);
+        if (!parsed.HasValue) return ts;
+        var adjusted = parsed.Value + TimeSpan.FromSeconds(offsetSeconds);
+        if (adjusted < TimeSpan.Zero) adjusted = TimeSpan.Zero;
+        return adjusted.ToString(@"hh\:mm\:ss\,fff");
+    }
+
     [HttpGet("Progress")]
     public IActionResult GetProgress([FromQuery] string? taskId)
     {
@@ -653,4 +817,15 @@ public class SubtitleLanguageInfo
     public string? Codec { get; set; }
     public bool IsExternal { get; set; }
     public string? Title { get; set; }
+}
+
+public class AdjustTimingRequest
+{
+    public string ItemId { get; set; } = string.Empty;
+    public string? UserId { get; set; }
+    public int SubtitleIndex { get; set; }
+    public int ReferenceSubtitleIndex { get; set; }
+    public string? Format { get; set; } = "srt";
+    public string? Language { get; set; }
+    public bool Apply { get; set; }
 }
