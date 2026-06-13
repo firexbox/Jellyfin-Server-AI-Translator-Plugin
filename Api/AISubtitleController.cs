@@ -91,7 +91,9 @@ public class AISubtitleController : ControllerBase
                 return BadRequest(new { Error = "\u65e0\u6cd5\u89e3\u6790\u5b57\u5e55\u5185\u5bb9" });
 
             // Detect source language: quick Unicode → Jellyfin metadata → AI fallback
-            var sampleText = string.Join("\n", entries.Take(5).Select(e => e.Text));
+            // Strip ASS/SSA formatting tags that could confuse detection
+            var sampleText = string.Join("\n", entries.Take(5).Select(e =>
+                System.Text.RegularExpressions.Regex.Replace(e.Text, @"\{[^}]*\}|<[^>]*>", "")));
             var quickResult = QuickDetectLanguage(sampleText);
             string sourceLangName, sourceLangCode;
 
@@ -231,7 +233,7 @@ public class AISubtitleController : ControllerBase
                         var bilingualContent = WriteSrtDirect(bilingualEntries);
                         var savedPath = TrySaveToMediaDir(capturedMediaDir, capturedVideoName,
                             $".{LangCode(capturedTargetLang)}-{NormalizeLangCode(capturedSourceCode)}.{capturedFormat}", bilingualContent);
-                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, NormalizeLangCode(capturedSourceCode), CancellationToken.None);
+                        await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, LangCode(capturedTargetLang), CancellationToken.None);
                         var msg2 = savedPath != null
                             ? $"已生成 {capturedTargetLang}-{capturedSourceLang} 双语字幕"
                             : $"已通过 API 上传 {capturedTargetLang}-{capturedSourceLang} 双语字幕 (媒体目录不可写)";
