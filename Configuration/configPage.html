@@ -388,6 +388,8 @@
                     if (langCode === 'eng' || langCode === 'en') { tagBg = '#1a2a3a'; tagColor = '#8cf'; }
                     else if (langCode === 'chi' || langCode === 'zho' || langCode === 'zh') { tagBg = '#1a3a1a'; tagColor = '#8f8'; }
                     else if (langCode === 'zh-en' || langCode === 'en-zh') { tagBg = '#2a3a1a'; tagColor = '#af8'; }
+                    else if (langCode === 'zh-ja' || langCode === 'ja-zh') { tagBg = '#3a2a1a'; tagColor = '#fa8'; }
+                    else if (langCode === 'zh-ko' || langCode === 'ko-zh') { tagBg = '#2a2a3a'; tagColor = '#aaf'; }
                     else if (langCode === 'jpn' || langCode === 'ja') { tagBg = '#3a1a1a'; tagColor = '#f88'; }
                     else if (langCode === 'kor' || langCode === 'ko') { tagBg = '#3a3a1a'; tagColor = '#ff8'; }
                     else if (langCode === 'deu' || langCode === 'de') { tagBg = '#1a1a3a'; tagColor = '#aaf'; }
@@ -657,7 +659,7 @@
             }
 
             function langNameMap(code) {
-                var map = {eng:'英文', chi:'中文', zho:'中文', spa:'西班牙文', fra:'法语', deu:'德语', jpn:'日文', kor:'韩文', rus:'俄文', por:'葡萄牙语', ara:'阿拉伯语', ita:'意大利语', en:'英文', zh:'中文', 'zh-en':'中英', 'en-zh':'中英', ja:'日文', ko:'韩文', de:'德语', fr:'法语', es:'西班牙语', ru:'俄文', pt:'葡萄牙语', ar:'阿拉伯语'};
+                var map = {eng:'英文', chi:'中文', zho:'中文', spa:'西班牙文', fra:'法语', deu:'德语', jpn:'日文', kor:'韩文', rus:'俄文', por:'葡萄牙语', ara:'阿拉伯语', ita:'意大利语', en:'英文', zh:'中文', 'zh-en':'中英', 'en-zh':'中英', 'zh-ja':'中日', 'ja-zh':'中日', 'zh-ko':'中韩', 'ko-zh':'中韩', ja:'日文', ko:'韩文', de:'德语', fr:'法语', es:'西班牙语', ru:'俄文', pt:'葡萄牙语', ar:'阿拉伯语'};
                 return map[code] || code;
             }
         </script>

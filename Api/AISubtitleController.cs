@@ -401,17 +401,25 @@ public class AISubtitleController : ControllerBase
 
         var s = text.Substring(0, Math.Min(text.Length, 200));
 
-        // Detect mixed Chinese + English first (bilingual subtitles)
         var hasCJK = System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u4e00-\u9fff\u3400-\u4dbf]");
         var hasLatin = System.Text.RegularExpressions.Regex.IsMatch(s, @"[a-zA-Z]{2,}");
+        var hasKana = System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u3040-\u309f\u30a0-\u30ff]");
+        var hasHangul = System.Text.RegularExpressions.Regex.IsMatch(s, @"[\uac00-\ud7af]");
+
+        // Detect mixed bilingual subtitles
+        if (hasCJK && hasKana)
+            return new LanguageResult { Code = "zh-ja", Name = "中日" };
+        if (hasCJK && hasHangul)
+            return new LanguageResult { Code = "zh-ko", Name = "中韩" };
         if (hasCJK && hasLatin)
             return new LanguageResult { Code = "zh-en", Name = "中英" };
 
+        // Single-language detection
         if (hasCJK)
             return new LanguageResult { Code = "zh", Name = "中文" };
-        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u3040-\u309f\u30a0-\u30ff]"))
+        if (hasKana)
             return new LanguageResult { Code = "ja", Name = "日文" };
-        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\uac00-\ud7af]"))
+        if (hasHangul)
             return new LanguageResult { Code = "ko", Name = "韩文" };
         if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[\u0400-\u04ff]"))
             return new LanguageResult { Code = "ru", Name = "俄文" };
@@ -423,7 +431,7 @@ public class AISubtitleController : ControllerBase
         // Latin-script languages: check for specific accented chars
         if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[áéíóúñüçàèìòù]"))
             return new LanguageResult { Code = "??", Name = "拉丁语系" }; // ambiguous, need AI
-        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"[a-zA-Z]{3,}"))
+        if (hasLatin)
             return new LanguageResult { Code = "en", Name = "英文" };
 
         return new LanguageResult { Code = "??", Name = "Unknown" };
@@ -774,6 +782,8 @@ public class AISubtitleController : ControllerBase
             ["eng"] = "\u82f1\u6587", ["en"] = "\u82f1\u6587",
             ["chi"] = "\u4e2d\u6587", ["zho"] = "\u4e2d\u6587", ["zh"] = "\u4e2d\u6587",
             ["zh-en"] = "\u4e2d\u82f1", ["en-zh"] = "\u4e2d\u82f1",
+            ["zh-ja"] = "\u4e2d\u65e5", ["ja-zh"] = "\u4e2d\u65e5",
+            ["zh-ko"] = "\u4e2d\u97e9", ["ko-zh"] = "\u4e2d\u97e9",
             ["jpn"] = "\u65e5\u6587", ["ja"] = "\u65e5\u6587",
             ["kor"] = "\u97e9\u6587", ["ko"] = "\u97e9\u6587",
             ["deu"] = "\u5fb7\u8bed", ["de"] = "\u5fb7\u8bed",
