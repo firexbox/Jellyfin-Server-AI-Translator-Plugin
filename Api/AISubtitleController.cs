@@ -453,11 +453,20 @@ public class AISubtitleController : ControllerBase
             if (string.IsNullOrWhiteSpace(refContent))
                 return BadRequest(new { Error = $"无法获取参考字幕 (索引 {refIndex}, 尝试格式 {string.Join("/", tryFormats)}): {lastError}" });
 
-            // Parse both
+            // Parse both with detailed error reporting
             var extEntries = SubtitleParser.Parse(extContent);
             var refEntries = SubtitleParser.Parse(refContent);
-            if (extEntries.Count == 0 || refEntries.Count == 0)
-                return BadRequest(new { Error = "无法解析字幕内容" });
+
+            if (extEntries.Count == 0)
+            {
+                var preview = extContent.Length > 200 ? extContent[..200] : extContent;
+                return BadRequest(new { Error = $"无法解析待调整字幕 (索引 {request.SubtitleIndex})，内容预览: {preview}" });
+            }
+            if (refEntries.Count == 0)
+            {
+                var preview = refContent.Length > 200 ? refContent[..200] : refContent;
+                return BadRequest(new { Error = $"无法解析参考字幕 (索引 {refIndex}, codec={refCodec})，内容预览: {preview}" });
+            }
 
             // Calculate offset using first N entries
             var sampleCount = Math.Min(Math.Min(extEntries.Count, refEntries.Count), 10);
