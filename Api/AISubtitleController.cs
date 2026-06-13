@@ -602,10 +602,8 @@ public class AISubtitleController : ControllerBase
 
                 var adjustedContent = WriteSrtDirect(adjusted);
 
-                // Try save to media dir, fall back to API upload only
+                // Upload via Jellyfin API (saves to media dir + registers as track)
                 var langCode = request.Language ?? "chi";
-                var savedPath = TrySaveToMediaDir(mediaDir, videoName,
-                    $".adjusted.{format}", adjustedContent);
                 await UploadSubtitleAsync(_httpClientFactory, token, request.ItemId,
                     adjustedContent, format, langCode, ct);
 
@@ -617,12 +615,9 @@ public class AISubtitleController : ControllerBase
                     ExternalFirstTimestamp = extEntries[0].StartTime,
                     ReferenceFirstTimestamp = refEntries.Count > 0 ? refEntries[0].StartTime : "N/A",
                     TotalEntries = extEntries.Count,
-                    SavedPath = savedPath,
                     Message = isManual
                         ? $"已按手动偏移调整 {extEntries.Count} 条字幕 ({offsetDisplay})"
-                        : savedPath != null
-                            ? $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
-                            : $"已通过 API 上传调整后的字幕 ({extEntries.Count} 条，偏移 {offsetDisplay})"
+                        : $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
                 });
             }
 
