@@ -156,15 +156,12 @@ public class AISubtitleController : ControllerBase
                     if (capturedMode == "translated")
                     {
                         var translatedContent = SubtitleWriter.Write(translatedEntries, capturedFormat);
-                        if (!string.IsNullOrWhiteSpace(capturedVideoPath))
-                        {
-                            var outPath = System.IO.Path.Combine(capturedMediaDir, $"{capturedVideoName}.{LangCode(capturedTargetLang)}.srt");
-                            await System.IO.File.WriteAllTextAsync(outPath, translatedContent);
-                            try { System.IO.File.SetUnixFileMode(outPath,
-                                System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite |
-                                System.IO.UnixFileMode.GroupRead | System.IO.UnixFileMode.OtherRead); } catch { }
-                        }
+                        var savedPath = TrySaveToMediaDir(capturedMediaDir, capturedVideoName,
+                            $".{LangCode(capturedTargetLang)}.{capturedFormat}", translatedContent);
                         await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, translatedContent, capturedFormat, LangCode(capturedTargetLang), CancellationToken.None);
+                        var msg = savedPath != null
+                            ? $"已生成 {capturedTargetLang} 字幕"
+                            : $"已通过 API 上传 {capturedTargetLang} 字幕 (媒体目录不可写)";
                         WriteProgress(capturedProgressPath, new TaskProgress
                         {
                             TaskId = taskId, ItemId = capturedItemId, ItemName = capturedVideoName,
@@ -172,7 +169,7 @@ public class AISubtitleController : ControllerBase
                             Status = "completed", SourceLanguage = capturedSourceLang,
                             TargetLanguage = capturedTargetLang, EntryCount = capturedEntries.Count,
                             StartTime = DateTime.UtcNow.ToString("O"), EndTime = DateTime.UtcNow.ToString("O"),
-                            Message = $"\u2705 \u5df2\u751f\u6210 {capturedTargetLang} \u5b57\u5e55"
+                            Message = msg
                         });
                     }
                     else if (capturedMode == "bilingual")
@@ -181,7 +178,6 @@ public class AISubtitleController : ControllerBase
                         foreach (var entry in capturedEntries)
                         {
                             var t = translatedEntries.FirstOrDefault(x => x.Index == entry.Index);
-                            // Target language on top, source below
                             bilingualEntries.Add(new SubtitleEntry
                             {
                                 Index = entry.Index,
@@ -193,15 +189,12 @@ public class AISubtitleController : ControllerBase
                             });
                         }
                         var bilingualContent = WriteSrtDirect(bilingualEntries);
-                        if (!string.IsNullOrWhiteSpace(capturedVideoPath))
-                        {
-                            var bilPath = System.IO.Path.Combine(capturedMediaDir, $"{capturedVideoName}.{LangCode(capturedTargetLang)}-{capturedSourceCode}.srt");
-                            await System.IO.File.WriteAllTextAsync(bilPath, bilingualContent);
-                            try { System.IO.File.SetUnixFileMode(bilPath,
-                                System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite |
-                                System.IO.UnixFileMode.GroupRead | System.IO.UnixFileMode.OtherRead); } catch { }
-                        }
+                        var savedPath = TrySaveToMediaDir(capturedMediaDir, capturedVideoName,
+                            $".{LangCode(capturedTargetLang)}-{capturedSourceCode}.{capturedFormat}", bilingualContent);
                         await UploadSubtitleAsync(capturedFactory, capturedToken, capturedItemId, bilingualContent, capturedFormat, LangCode(capturedTargetLang), CancellationToken.None);
+                        var msg2 = savedPath != null
+                            ? $"已生成 {capturedTargetLang}-{capturedSourceLang} 双语字幕"
+                            : $"已通过 API 上传 {capturedTargetLang}-{capturedSourceLang} 双语字幕 (媒体目录不可写)";
                         WriteProgress(capturedProgressPath, new TaskProgress
                         {
                             TaskId = taskId, ItemId = capturedItemId, ItemName = capturedVideoName,
@@ -209,7 +202,7 @@ public class AISubtitleController : ControllerBase
                             Status = "completed", SourceLanguage = capturedSourceLang,
                             TargetLanguage = capturedTargetLang, EntryCount = capturedEntries.Count,
                             StartTime = DateTime.UtcNow.ToString("O"), EndTime = DateTime.UtcNow.ToString("O"),
-                            Message = $"\u2705 \u5df2\u751f\u6210 {capturedTargetLang}-{capturedSourceLang} \u53cc\u8bed\u5b57\u5e55"
+                            Message = msg2
                         });
                     }
                 }
@@ -489,20 +482,10 @@ public class AISubtitleController : ControllerBase
 
                 var adjustedContent = WriteSrtDirect(adjusted);
 
-                // Save as new file with _adjusted suffix
-                var outPath = System.IO.Path.Combine(mediaDir,
-                    $"{videoName}.adjusted.{format}");
-                await System.IO.File.WriteAllTextAsync(outPath, adjustedContent, ct);
-                try
-                {
-                    System.IO.File.SetUnixFileMode(outPath,
-                        System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite |
-                        System.IO.UnixFileMode.GroupRead | System.IO.UnixFileMode.OtherRead);
-                }
-                catch { }
-
-                // Upload as new subtitle track
+                // Try save to media dir, fall back to API upload only
                 var langCode = request.Language ?? "chi";
+                var savedPath = TrySaveToMediaDir(mediaDir, videoName,
+                    $".adjusted.{format}", adjustedContent);
                 await UploadSubtitleAsync(_httpClientFactory, token, request.ItemId,
                     adjustedContent, format, langCode, ct);
 
@@ -514,8 +497,10 @@ public class AISubtitleController : ControllerBase
                     ExternalFirstTimestamp = extEntries[0].StartTime,
                     ReferenceFirstTimestamp = refEntries[0].StartTime,
                     TotalEntries = extEntries.Count,
-                    SavedPath = outPath,
-                    Message = $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
+                    SavedPath = savedPath,
+                    Message = savedPath != null
+                        ? $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
+                        : $"已通过 API 上传调整后的字幕 ({extEntries.Count} 条，偏移 {offsetDisplay})"
                 });
             }
 
@@ -556,6 +541,32 @@ public class AISubtitleController : ControllerBase
         var adjusted = parsed.Value + TimeSpan.FromSeconds(offsetSeconds);
         if (adjusted < TimeSpan.Zero) adjusted = TimeSpan.Zero;
         return adjusted.ToString(@"hh\:mm\:ss\,fff");
+    }
+
+    /// <summary>
+    /// Tries to save content to media directory. Returns the saved path, or null if media dir is not writable.
+    /// </summary>
+    private static string? TrySaveToMediaDir(string mediaDir, string videoName, string suffix, string content)
+    {
+        if (string.IsNullOrWhiteSpace(mediaDir) || string.IsNullOrWhiteSpace(videoName))
+            return null;
+        try
+        {
+            var path = System.IO.Path.Combine(mediaDir, $"{videoName}{suffix}");
+            System.IO.File.WriteAllText(path, content);
+            try
+            {
+                System.IO.File.SetUnixFileMode(path,
+                    System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.UserWrite |
+                    System.IO.UnixFileMode.GroupRead | System.IO.UnixFileMode.OtherRead);
+            }
+            catch { }
+            return path;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     [HttpGet("Progress")]
