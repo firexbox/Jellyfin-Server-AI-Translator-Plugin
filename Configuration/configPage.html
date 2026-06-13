@@ -91,14 +91,19 @@
 
                 <!-- 时间轴调整对话框 -->
                 <div id="adjustModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
-                    <div style="background:#222;border:1px solid #444;border-radius:8px;padding:20px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto">
-                        <h3 style="margin:0 0 16px 0;color:#fa0">[ 字幕时间轴调整 ]</h3>
-                        <div id="adjustContent" style="color:#ccc;font-size:13px;line-height:1.6">
-                            <div style="color:#888">正在分析偏移...</div>
+                    <div style="background:#222;border:1px solid #444;border-radius:8px;padding:20px;max-width:420px;width:90%">
+                        <h3 style="margin:0 0 16px 0;color:#fa0">[ 手动调时轴 ]</h3>
+                        <div style="color:#ccc;font-size:13px;margin-bottom:12px">
+                            外挂字幕时间偏移（秒）<br>
+                            <span style="color:#888;font-size:11px">正数=延后，负数=提前。例: 2.5 延后2.5秒, -1.3 提前1.3秒</span>
                         </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="number" id="manualOffsetInput" label="偏移(秒)" value="0" step="0.1" style="width:100%" />
+                        </div>
+                        <div id="manualAdjustStatus" style="color:#888;font-size:12px;margin-top:8px;min-height:1.2em"></div>
                         <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
-                            <button is="emby-button" type="button" id="btnAdjustCancel" class="raised" style="background:#444">取消</button>
-                            <button is="emby-button" type="button" id="btnAdjustApply" class="raised button-submit" style="background:#2a6a2a;display:none">应用调整</button>
+                            <button is="emby-button" type="button" id="btnManualCancel" class="raised" style="background:#444">取消</button>
+                            <button is="emby-button" type="button" id="btnManualApply" class="raised button-submit" style="background:#2a6a2a">应用</button>
                         </div>
                     </div>
                 </div>
@@ -419,9 +424,10 @@
                         h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'original\',this)">[原] 原字幕</button>';
                         h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#2a6a2a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'translated\',this)">[译] ' + targetLang + '</button>';
                         h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#1a4a6a" onclick="doTranslate(\'' + itemId + '\',' + s.Index + ',\'bilingual\',this)">[双] ' + targetLang + '-' + langName + '</button>';
-                        // Adjust timing button: only for external subtitles
+                        // Adjust timing buttons: only for external subtitles
                         if (s.IsExternal) {
-                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#6a3a1a" onclick="showAdjustTiming(\'' + itemId + '\',' + s.Index + ',\'' + selectedItemName.replace(/'/g, '\\\'') + '\',this)">[调] 调时轴</button>';
+                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#6a3a1a" onclick="doAutoAdjust(\'' + itemId + '\',' + s.Index + ',this)">[自] 自动调轴</button>';
+                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#4a3a1a" onclick="showManualAdjust(\'' + itemId + '\',' + s.Index + ',this)">[手] 手动</button>';
                         }
                     }
                     h += '</div>';
@@ -512,15 +518,10 @@
             }
 
             // ======== 时间轴调整 ========
-            var _adjustData = { itemId: null, subIdx: null, offset: 0, refIdx: 0 };
-            var _adjustBtn = null;
+            var _adjustData = { itemId: null, subIdx: null, refIdx: 0 };
 
-            function showAdjustTiming(itemId, subIdx, itemName, btn) {
-                _adjustBtn = btn;
-                _adjustData.itemId = itemId;
-                _adjustData.subIdx = subIdx;
-
-                // Find first embedded TEXT subtitle as reference (skip bitmap codecs)
+            // Find reference subtitle index (first text-format embedded)
+            function findRefIdx() {
                 var subs = _cachedSubs || [];
                 var refIdx = -1;
                 for (var i = 0; i < subs.length; i++) {
@@ -530,123 +531,121 @@
                     }
                 }
                 if (refIdx < 0) {
-                    // Try again without bitmap filter (at least show error from backend)
                     for (var i = 0; i < subs.length; i++) {
                         if (!subs[i].IsExternal) { refIdx = subs[i].Index; break; }
                     }
                 }
+                return refIdx;
+            }
+
+            // Refresh media item and show status
+            function refreshItem(itemId, msg, color) {
+                var ts = document.getElementById('translateStatus');
+                ts.style.color = color || '#8f8';
+                ts.textContent = msg;
+                var token = ApiClient.accessToken();
+                var rx = new XMLHttpRequest();
+                rx.open('POST', ApiClient.getUrl('/Items/' + itemId + '/Refresh'), true);
+                rx.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                rx.setRequestHeader('Content-Type', 'application/json');
+                rx.send('{}');
+            }
+
+            // Auto adjust: one-click detect + apply
+            function doAutoAdjust(itemId, subIdx, btn) {
+                var refIdx = findRefIdx();
                 if (refIdx < 0) {
-                    alert('未找到内嵌参考字幕，无法调整时间轴');
+                    alert('未找到内嵌参考字幕');
                     return;
                 }
-                _adjustData.refIdx = refIdx;
-
-                // Show modal
-                var modal = document.getElementById('adjustModal');
-                modal.style.display = 'flex';
-                var content = document.getElementById('adjustContent');
-                content.innerHTML = '<div style="color:#888">正在分析偏移...</div>';
-                document.getElementById('btnAdjustApply').style.display = 'none';
-
-                var origText = btn.innerHTML;
+                var orig = btn.innerHTML;
                 btn.innerHTML = '[...]';
                 btn.disabled = true;
 
-                var token = ApiClient.accessToken();
-                var userId = ApiClient.getCurrentUserId();
                 var xhr = new XMLHttpRequest();
                 xhr.open('POST', ApiClient.getUrl('/AITranslator/Subtitle/AdjustTiming'), true);
-                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
                 xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.onload = function() {
-                    btn.innerHTML = origText;
+                    btn.innerHTML = orig;
                     btn.disabled = false;
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            var r = JSON.parse(xhr.responseText);
-                            _adjustData.offset = r.OffsetSeconds;
-                            var h = '<div style="margin-bottom:12px"><span style="color:#fa0;font-size:16px;font-weight:bold">' + r.OffsetDisplay + '</span>';
-                            h += '<span style="color:#888;font-size:12px;margin-left:8px">参考: 内嵌字幕 #' + refIdx + ' | 共 ' + r.TotalEntries + ' 条字幕</span></div>';
-
-                            if (r.PreviewBefore && r.PreviewAfter) {
-                                h += '<div style="display:flex;gap:12px;margin-bottom:8px">';
-                                h += '<div style="flex:1"><div style="color:#888;font-size:11px;margin-bottom:4px">调整前:</div>';
-                                h += '<pre style="background:#1a1a1a;padding:8px;border-radius:4px;font-size:11px;color:#f88;margin:0;white-space:pre-wrap">' + r.PreviewBefore + '</pre></div>';
-                                h += '<div style="flex:1"><div style="color:#888;font-size:11px;margin-bottom:4px">调整后:</div>';
-                                h += '<pre style="background:#1a1a1a;padding:8px;border-radius:4px;font-size:11px;color:#8f8;margin:0;white-space:pre-wrap">' + r.PreviewAfter + '</pre></div>';
-                                h += '</div>';
-                            }
-                            h += '<div style="color:#888;font-size:12px;margin-top:8px">外挂字幕: ' + r.ExternalFirstTimestamp + ' | 内嵌参考: ' + r.ReferenceFirstTimestamp + '</div>';
-                            content.innerHTML = h;
-                            document.getElementById('btnAdjustApply').style.display = '';
-                        } catch(e) {
-                            content.innerHTML = '<div style="color:#f88">[ERR] 解析响应失败</div>';
-                        }
+                        var r = JSON.parse(xhr.responseText);
+                        refreshItem(itemId, '[OK] 自动调轴: ' + r.OffsetDisplay, '#8f8');
                     } else {
-                        var err = '请求失败 (' + xhr.status + ')';
-                        try { var e = JSON.parse(xhr.responseText); err = e.Error || err; } catch(ee) {}
-                        content.innerHTML = '<div style="color:#f88">[ERR] ' + err + '</div>';
+                        var err = '请求失败';
+                        try { err = JSON.parse(xhr.responseText).Error || err; } catch(e) {}
+                        refreshItem(itemId, '[ERR] ' + err, '#f88');
                     }
                 };
                 xhr.onerror = function() {
-                    btn.innerHTML = origText;
+                    btn.innerHTML = orig;
                     btn.disabled = false;
-                    content.innerHTML = '<div style="color:#f88">[ERR] 网络错误</div>';
+                    refreshItem(itemId, '[ERR] 网络错误', '#f88');
                 };
                 xhr.send(JSON.stringify({
-                    ItemId: itemId, UserId: userId,
+                    ItemId: itemId, UserId: ApiClient.getCurrentUserId(),
                     SubtitleIndex: subIdx, ReferenceSubtitleIndex: refIdx,
-                    Format: 'srt', Apply: false
+                    Format: 'srt', Apply: true
                 }));
             }
 
-            document.getElementById('btnAdjustCancel').addEventListener('click', function() {
+            // Manual adjust: show offset input dialog
+            function showManualAdjust(itemId, subIdx, btn) {
+                var refIdx = findRefIdx();
+                if (refIdx < 0) {
+                    alert('未找到内嵌参考字幕');
+                    return;
+                }
+                _adjustData.itemId = itemId;
+                _adjustData.subIdx = subIdx;
+                _adjustData.refIdx = refIdx;
+
+                document.getElementById('manualOffsetInput').value = '0';
+                document.getElementById('manualAdjustStatus').textContent = '';
+                document.getElementById('adjustModal').style.display = 'flex';
+            }
+
+            document.getElementById('btnManualCancel').addEventListener('click', function() {
                 document.getElementById('adjustModal').style.display = 'none';
-                _adjustData = { itemId: null, subIdx: null, offset: 0, refIdx: 0 };
             });
 
-            document.getElementById('btnAdjustApply').addEventListener('click', function() {
+            document.getElementById('btnManualApply').addEventListener('click', function() {
                 if (!_adjustData.itemId) return;
-                var btnApply = document.getElementById('btnAdjustApply');
+                var offset = parseFloat(document.getElementById('manualOffsetInput').value) || 0;
+                var btnApply = document.getElementById('btnManualApply');
                 btnApply.disabled = true;
-                btnApply.innerHTML = '[...] 应用中...';
+                document.getElementById('manualAdjustStatus').textContent = '[...] 应用中...';
+                document.getElementById('manualAdjustStatus').style.color = '#8cf';
 
-                var token = ApiClient.accessToken();
-                var userId = ApiClient.getCurrentUserId();
                 var xhr = new XMLHttpRequest();
                 xhr.open('POST', ApiClient.getUrl('/AITranslator/Subtitle/AdjustTiming'), true);
-                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
+                xhr.setRequestHeader('Authorization', 'MediaBrowser Token=' + ApiClient.accessToken());
                 xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.onload = function() {
                     btnApply.disabled = false;
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            var r = JSON.parse(xhr.responseText);
-                            document.getElementById('adjustContent').innerHTML = '<div style="color:#8f8;font-size:14px">[OK] ' + (r.Message || '已应用调整') + '</div>';
-                            btnApply.style.display = 'none';
-                            // Refresh media library
-                            var rx = new XMLHttpRequest();
-                            rx.open('POST', ApiClient.getUrl('/Items/' + _adjustData.itemId + '/Refresh'), true);
-                            rx.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
-                            rx.setRequestHeader('Content-Type', 'application/json');
-                            rx.send('{}');
-                        } catch(e) {
-                            document.getElementById('adjustContent').innerHTML = '<div style="color:#f88">[ERR] 解析响应失败</div>';
-                        }
+                        var r = JSON.parse(xhr.responseText);
+                        document.getElementById('manualAdjustStatus').textContent = '[OK] ' + r.Message;
+                        document.getElementById('manualAdjustStatus').style.color = '#8f8';
+                        document.getElementById('adjustModal').style.display = 'none';
+                        refreshItem(_adjustData.itemId, '[OK] 手动调轴: ' + r.OffsetDisplay, '#8f8');
                     } else {
-                        var err = '应用失败 (' + xhr.status + ')';
-                        try { var e = JSON.parse(xhr.responseText); err = e.Error || err; } catch(ee) {}
-                        document.getElementById('adjustContent').innerHTML = '<div style="color:#f88">[ERR] ' + err + '</div>';
+                        var err = '请求失败';
+                        try { err = JSON.parse(xhr.responseText).Error || err; } catch(e) {}
+                        document.getElementById('manualAdjustStatus').textContent = '[ERR] ' + err;
+                        document.getElementById('manualAdjustStatus').style.color = '#f88';
                     }
                 };
                 xhr.onerror = function() {
                     btnApply.disabled = false;
-                    document.getElementById('adjustContent').innerHTML = '<div style="color:#f88">[ERR] 网络错误</div>';
+                    document.getElementById('manualAdjustStatus').textContent = '[ERR] 网络错误';
+                    document.getElementById('manualAdjustStatus').style.color = '#f88';
                 };
                 xhr.send(JSON.stringify({
-                    ItemId: _adjustData.itemId, UserId: userId,
+                    ItemId: _adjustData.itemId, UserId: ApiClient.getCurrentUserId(),
                     SubtitleIndex: _adjustData.subIdx, ReferenceSubtitleIndex: _adjustData.refIdx,
-                    Format: 'srt', Apply: true
+                    Format: 'srt', Apply: true, ManualOffsetSeconds: offset
                 }));
             });
 

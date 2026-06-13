@@ -530,37 +530,51 @@ public class AISubtitleController : ControllerBase
                 return BadRequest(new { Error = $"无法解析参考字幕 (索引 {refIndex}, codec={refCodec})，内容预览: {preview}" });
             }
 
-            // Calculate offset using first N entries
-            var sampleCount = Math.Min(Math.Min(extEntries.Count, refEntries.Count), 10);
-            var offsets = new List<double>();
-            for (int i = 0; i < sampleCount; i++)
+            // Determine offset: manual override or auto-calculate
+            double appliedOffset;
+            string offsetDisplay;
+
+            if (request.ManualOffsetSeconds.HasValue)
             {
-                var extStart = ParseTimestamp(extEntries[i].StartTime);
-                var refStart = ParseTimestamp(refEntries[i].StartTime);
-                if (extStart.HasValue && refStart.HasValue)
-                    offsets.Add((extStart.Value - refStart.Value).TotalSeconds);
+                appliedOffset = -request.ManualOffsetSeconds.Value; // negate: user enters "delay 2s" → shift -2s
+                var absOff = Math.Abs(request.ManualOffsetSeconds.Value);
+                var dir = request.ManualOffsetSeconds.Value >= 0 ? "延后" : "提前";
+                offsetDisplay = $"[手动] {dir} {absOff:F1} 秒";
             }
+            else
+            {
+                // Calculate offset using first N entries
+                var sampleCount = Math.Min(Math.Min(extEntries.Count, refEntries.Count), 10);
+                var offsets = new List<double>();
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    var extStart = ParseTimestamp(extEntries[i].StartTime);
+                    var refStart = ParseTimestamp(refEntries[i].StartTime);
+                    if (extStart.HasValue && refStart.HasValue)
+                        offsets.Add((extStart.Value - refStart.Value).TotalSeconds);
+                }
 
-            if (offsets.Count == 0)
-                return BadRequest(new { Error = "无法计算时间偏移" });
+                if (offsets.Count == 0)
+                    return BadRequest(new { Error = "无法计算时间偏移" });
 
-            // Use median to avoid outlier influence
-            offsets.Sort();
-            double medianOffset = offsets.Count % 2 == 1
-                ? offsets[offsets.Count / 2]
-                : (offsets[offsets.Count / 2 - 1] + offsets[offsets.Count / 2]) / 2.0;
+                offsets.Sort();
+                double medianOffset = offsets.Count % 2 == 1
+                    ? offsets[offsets.Count / 2]
+                    : (offsets[offsets.Count / 2 - 1] + offsets[offsets.Count / 2]) / 2.0;
 
-            var absOffset = Math.Abs(medianOffset);
-            var direction = medianOffset >= 0 ? "延后" : "提前";
-            var offsetDisplay = $"{direction} {absOffset:F3} 秒";
+                appliedOffset = -medianOffset;
+                var absOffset = Math.Abs(medianOffset);
+                var direction = medianOffset >= 0 ? "延后" : "提前";
+                offsetDisplay = $"{direction} {absOffset:F3} 秒";
+            }
 
             // Generate preview of first 3 entries
             var previewBefore = string.Join("\n", extEntries.Take(3).Select(e =>
                 $"{e.Index}\n{e.StartTime} --> {e.EndTime}\n{e.Text}"));
             var previewAfter = string.Join("\n", extEntries.Take(3).Select(e =>
             {
-                var newStart = AdjustTimestamp(e.StartTime, -medianOffset);
-                var newEnd = AdjustTimestamp(e.EndTime, -medianOffset);
+                var newStart = AdjustTimestamp(e.StartTime, appliedOffset);
+                var newEnd = AdjustTimestamp(e.EndTime, appliedOffset);
                 return $"{e.Index}\n{newStart} --> {newEnd}\n{e.Text}";
             }));
 
@@ -574,8 +588,8 @@ public class AISubtitleController : ControllerBase
                 var adjusted = extEntries.Select(e => new SubtitleEntry
                 {
                     Index = e.Index,
-                    StartTime = AdjustTimestamp(e.StartTime, -medianOffset),
-                    EndTime = AdjustTimestamp(e.EndTime, -medianOffset),
+                    StartTime = AdjustTimestamp(e.StartTime, appliedOffset),
+                    EndTime = AdjustTimestamp(e.EndTime, appliedOffset),
                     Text = e.Text
                 }).ToList();
 
@@ -591,22 +605,24 @@ public class AISubtitleController : ControllerBase
                 return Ok(new
                 {
                     Applied = true,
-                    OffsetSeconds = -medianOffset,
+                    OffsetSeconds = appliedOffset,
                     OffsetDisplay = offsetDisplay,
                     ExternalFirstTimestamp = extEntries[0].StartTime,
                     ReferenceFirstTimestamp = refEntries[0].StartTime,
                     TotalEntries = extEntries.Count,
                     SavedPath = savedPath,
-                    Message = savedPath != null
-                        ? $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
-                        : $"已通过 API 上传调整后的字幕 ({extEntries.Count} 条，偏移 {offsetDisplay})"
+                    Message = request.ManualOffsetSeconds.HasValue
+                        ? $"已按手动偏移调整 {extEntries.Count} 条字幕 ({offsetDisplay})"
+                        : savedPath != null
+                            ? $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
+                            : $"已通过 API 上传调整后的字幕 ({extEntries.Count} 条，偏移 {offsetDisplay})"
                 });
             }
 
             return Ok(new
             {
                 Applied = false,
-                OffsetSeconds = -medianOffset,
+                OffsetSeconds = appliedOffset,
                 OffsetDisplay = offsetDisplay,
                 ExternalFirstTimestamp = extEntries[0].StartTime,
                 ReferenceFirstTimestamp = refEntries[0].StartTime,
@@ -614,7 +630,10 @@ public class AISubtitleController : ControllerBase
                 PreviewAfter = previewAfter,
                 TotalEntries = extEntries.Count,
                 ReferenceTotalEntries = refEntries.Count,
-                Message = $"检测到偏移 {offsetDisplay}（基于前 {sampleCount} 条字幕）"
+                IsManual = request.ManualOffsetSeconds.HasValue,
+                Message = request.ManualOffsetSeconds.HasValue
+                    ? $"手动偏移 {offsetDisplay}"
+                    : $"检测到偏移 {offsetDisplay}"
             });
         }
         catch (Exception ex)
@@ -1028,4 +1047,5 @@ public class AdjustTimingRequest
     public string? Format { get; set; } = "srt";
     public string? Language { get; set; }
     public bool Apply { get; set; }
+    public double? ManualOffsetSeconds { get; set; }
 }
