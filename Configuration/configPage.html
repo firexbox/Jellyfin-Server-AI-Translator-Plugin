@@ -538,7 +538,7 @@
                 return refIdx;
             }
 
-            // Refresh media item and show status
+            // Refresh media item, show status, and reload subtitles
             function refreshItem(itemId, msg, color) {
                 var ts = document.getElementById('translateStatus');
                 ts.style.color = color || '#8f8';
@@ -548,6 +548,12 @@
                 rx.open('POST', ApiClient.getUrl('/Items/' + itemId + '/Refresh'), true);
                 rx.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
                 rx.setRequestHeader('Content-Type', 'application/json');
+                rx.onload = function() {
+                    // Wait for Jellyfin to process, then reload subtitle list
+                    setTimeout(function() {
+                        selectItem(itemId, selectedItemName);
+                    }, 2000);
+                };
                 rx.send('{}');
             }
 
