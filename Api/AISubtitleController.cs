@@ -485,7 +485,10 @@ public class AISubtitleController : ControllerBase
             string? refCodec = null;
 
             // Manual mode: skip reference subtitle — not needed
-            if (request.ManualOffsetSeconds.HasValue)
+            var isManual = request.ManualOffsetSeconds != null;
+            Console.WriteLine($"[AI Translator] AdjustTiming ManualOffsetSeconds={request.ManualOffsetSeconds} HasValue={request.ManualOffsetSeconds.HasValue} isManual={isManual} Apply={request.Apply}");
+
+            if (isManual)
             {
                 refEntries = new List<SubtitleEntry>();
             }
@@ -538,7 +541,7 @@ public class AISubtitleController : ControllerBase
             double appliedOffset;
             string offsetDisplay;
 
-            if (request.ManualOffsetSeconds.HasValue)
+            if (request.ManualOffsetSeconds != null)
             {
                 appliedOffset = -request.ManualOffsetSeconds.Value; // negate: user enters "delay 2s" → shift -2s
                 var absOff = Math.Abs(request.ManualOffsetSeconds.Value);
@@ -612,10 +615,10 @@ public class AISubtitleController : ControllerBase
                     OffsetSeconds = appliedOffset,
                     OffsetDisplay = offsetDisplay,
                     ExternalFirstTimestamp = extEntries[0].StartTime,
-                    ReferenceFirstTimestamp = refEntries[0].StartTime,
+                    ReferenceFirstTimestamp = refEntries.Count > 0 ? refEntries[0].StartTime : "N/A",
                     TotalEntries = extEntries.Count,
                     SavedPath = savedPath,
-                    Message = request.ManualOffsetSeconds.HasValue
+                    Message = isManual
                         ? $"已按手动偏移调整 {extEntries.Count} 条字幕 ({offsetDisplay})"
                         : savedPath != null
                             ? $"已调整并保存 {extEntries.Count} 条字幕，偏移 {offsetDisplay}"
@@ -629,13 +632,13 @@ public class AISubtitleController : ControllerBase
                 OffsetSeconds = appliedOffset,
                 OffsetDisplay = offsetDisplay,
                 ExternalFirstTimestamp = extEntries[0].StartTime,
-                ReferenceFirstTimestamp = refEntries[0].StartTime,
+                ReferenceFirstTimestamp = refEntries.Count > 0 ? refEntries[0].StartTime : "N/A",
                 PreviewBefore = previewBefore,
                 PreviewAfter = previewAfter,
                 TotalEntries = extEntries.Count,
                 ReferenceTotalEntries = refEntries.Count,
-                IsManual = request.ManualOffsetSeconds.HasValue,
-                Message = request.ManualOffsetSeconds.HasValue
+                IsManual = isManual,
+                Message = isManual
                     ? $"手动偏移 {offsetDisplay}"
                     : $"检测到偏移 {offsetDisplay}"
             });
