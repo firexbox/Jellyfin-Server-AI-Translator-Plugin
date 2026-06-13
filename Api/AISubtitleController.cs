@@ -474,60 +474,64 @@ public class AISubtitleController : ControllerBase
             if (string.IsNullOrWhiteSpace(extContent))
                 return BadRequest(new { Error = "无法获取待调整字幕内容" });
 
-            // Get reference subtitle content — skip bitmap codecs, try native codec first
-            var refIndex = request.ReferenceSubtitleIndex;
-            var refCodec = "srt";
-            // Find the reference subtitle in MediaStreams to get its codec
-            foreach (var stream in mediaSources.GetProperty("MediaStreams").EnumerateArray())
-            {
-                if (stream.TryGetProperty("Type", out var t) && t.GetString() == "Subtitle"
-                    && stream.TryGetProperty("Index", out var idxProp) && idxProp.GetInt32() == refIndex)
-                {
-                    refCodec = stream.TryGetProperty("Codec", out var cp) ? (cp.GetString() ?? "srt") : "srt";
-                    break;
-                }
-            }
-
-            // Reject bitmap subtitle codecs early
-            var bitmapCodecs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "pgssub", "hdmv_pgs", "dvdsub", "vobsub", "dvbsub", "xsub" };
-            if (bitmapCodecs.Contains(refCodec))
-                return BadRequest(new { Error = $"参考字幕 #{refIndex} 为位图格式 ({refCodec})，无法提取时间轴。请选择文字格式的内嵌字幕作为参考（如 SRT/ASS）" });
-
-            string? refContent = null;
-            // Try formats in order: native codec → srt → ass → vtt
-            var tryFormats = new[] { refCodec, "srt", "ass", "vtt" }.Distinct().ToArray();
-            string? lastError = null;
-            foreach (var tryFormat in tryFormats)
-            {
-                try
-                {
-                    var refSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{refIndex}/Stream.{tryFormat}";
-                    refContent = await GetStringAsync(refSubUrl, token, ct);
-                    if (!string.IsNullOrWhiteSpace(refContent)) break;
-                }
-                catch (Exception ex)
-                {
-                    lastError = ex.Message;
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(refContent))
-                return BadRequest(new { Error = $"无法获取参考字幕 (索引 {refIndex}, 尝试格式 {string.Join("/", tryFormats)}): {lastError}" });
-
-            // Parse both with detailed error reporting
             var extEntries = SubtitleParser.Parse(extContent);
-            var refEntries = SubtitleParser.Parse(refContent);
-
             if (extEntries.Count == 0)
             {
                 var preview = extContent.Length > 200 ? extContent[..200] : extContent;
                 return BadRequest(new { Error = $"无法解析待调整字幕 (索引 {request.SubtitleIndex})，内容预览: {preview}" });
             }
-            if (refEntries.Count == 0)
+
+            List<SubtitleEntry> refEntries;
+            string? refCodec = null;
+
+            // Manual mode: skip reference subtitle — not needed
+            if (request.ManualOffsetSeconds.HasValue)
             {
-                var preview = refContent.Length > 200 ? refContent[..200] : refContent;
-                return BadRequest(new { Error = $"无法解析参考字幕 (索引 {refIndex}, codec={refCodec})，内容预览: {preview}" });
+                refEntries = new List<SubtitleEntry>();
+            }
+            else
+            {
+                // Get reference subtitle content — skip bitmap codecs, try native codec first
+                var refIndex = request.ReferenceSubtitleIndex;
+                refCodec = "srt";
+                foreach (var stream in mediaSources.GetProperty("MediaStreams").EnumerateArray())
+                {
+                    if (stream.TryGetProperty("Type", out var t) && t.GetString() == "Subtitle"
+                        && stream.TryGetProperty("Index", out var idxProp) && idxProp.GetInt32() == refIndex)
+                    {
+                        refCodec = stream.TryGetProperty("Codec", out var cp) ? (cp.GetString() ?? "srt") : "srt";
+                        break;
+                    }
+                }
+
+                var bitmapCodecs2 = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "pgssub", "hdmv_pgs", "dvdsub", "vobsub", "dvbsub", "xsub" };
+                if (bitmapCodecs2.Contains(refCodec!))
+                    return BadRequest(new { Error = $"参考字幕 #{refIndex} 为位图格式 ({refCodec})，无法提取时间轴。请选择文字格式的内嵌字幕作为参考（如 SRT/ASS）" });
+
+                string? refContent = null;
+                var tryFormats = new[] { refCodec!, "srt", "ass", "vtt" }.Distinct().ToArray();
+                string? lastError = null;
+                foreach (var tryFormat in tryFormats)
+                {
+                    try
+                    {
+                        var refSubUrl = $"http://localhost:8096/Videos/{request.ItemId}/{sourceId}/Subtitles/{refIndex}/Stream.{tryFormat}";
+                        refContent = await GetStringAsync(refSubUrl, token, ct);
+                        if (!string.IsNullOrWhiteSpace(refContent)) break;
+                    }
+                    catch (Exception ex) { lastError = ex.Message; }
+                }
+
+                if (string.IsNullOrWhiteSpace(refContent))
+                    return BadRequest(new { Error = $"无法获取参考字幕 (索引 {refIndex}, 尝试格式 {string.Join("/", tryFormats)}): {lastError}" });
+
+                refEntries = SubtitleParser.Parse(refContent);
+                if (refEntries.Count == 0)
+                {
+                    var preview = refContent.Length > 200 ? refContent[..200] : refContent;
+                    return BadRequest(new { Error = $"无法解析参考字幕 (索引 {refIndex}, codec={refCodec})，内容预览: {preview}" });
+                }
             }
 
             // Determine offset: manual override or auto-calculate

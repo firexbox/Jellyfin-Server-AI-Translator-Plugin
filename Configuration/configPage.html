@@ -590,16 +590,11 @@
                 }));
             }
 
-            // Manual adjust: show offset input dialog
+            // Manual adjust: show offset input dialog (no reference needed)
             function showManualAdjust(itemId, subIdx, btn) {
-                var refIdx = findRefIdx();
-                if (refIdx < 0) {
-                    alert('未找到内嵌参考字幕');
-                    return;
-                }
                 _adjustData.itemId = itemId;
                 _adjustData.subIdx = subIdx;
-                _adjustData.refIdx = refIdx;
+                _adjustData.refIdx = 0;  // not used for manual
 
                 document.getElementById('manualOffsetInput').value = '0';
                 document.getElementById('manualAdjustStatus').textContent = '';
