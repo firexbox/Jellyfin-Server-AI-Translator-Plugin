@@ -92,7 +92,7 @@
                 <!-- 时间轴调整对话框 -->
                 <div id="adjustModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
                     <div style="background:#222;border:1px solid #444;border-radius:8px;padding:20px;max-width:420px;width:90%">
-                        <h3 style="margin:0 0 16px 0;color:#fa0">[ 手动调时轴 ]</h3>
+                        <h3 style="margin:0 0 16px 0;color:#fa0">[ 手动调轴 ]</h3>
                         <div style="color:#ccc;font-size:13px;margin-bottom:12px">
                             外挂字幕时间偏移（秒）<br>
                             <span style="color:#888;font-size:11px">正数=延后，负数=提前。例: 2.5 延后2.5秒, -1.3 提前1.3秒</span>
@@ -427,7 +427,7 @@
                         // Adjust timing buttons: only for external subtitles
                         if (s.IsExternal) {
                             h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#6a3a1a" onclick="doAutoAdjust(\'' + itemId + '\',' + s.Index + ',this)">[自] 自动调轴</button>';
-                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#4a3a1a" onclick="showManualAdjust(\'' + itemId + '\',' + s.Index + ',this)">[手] 手动</button>';
+                            h += '<button is="emby-button" type="button" class="raised" style="font-size:12px;padding:4px 10px;min-width:0;background:#4a3a1a" onclick="showManualAdjust(\'' + itemId + '\',' + s.Index + ',this)">[手] 手动调轴</button>';
                         }
                     }
                     h += '</div>';
@@ -538,7 +538,7 @@
                 return refIdx;
             }
 
-            // Refresh media item, show status, and reload subtitles
+            // Refresh media item and show status (no auto-reload to avoid race with library scan)
             function refreshItem(itemId, msg, color) {
                 var ts = document.getElementById('translateStatus');
                 ts.style.color = color || '#8f8';
@@ -548,12 +548,6 @@
                 rx.open('POST', ApiClient.getUrl('/Items/' + itemId + '/Refresh'), true);
                 rx.setRequestHeader('Authorization', 'MediaBrowser Token=' + token);
                 rx.setRequestHeader('Content-Type', 'application/json');
-                rx.onload = function() {
-                    // Wait for Jellyfin to process, then reload subtitle list
-                    setTimeout(function() {
-                        selectItem(itemId, selectedItemName);
-                    }, 2000);
-                };
                 rx.send('{}');
             }
 
